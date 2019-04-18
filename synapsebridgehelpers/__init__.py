@@ -6,3 +6,4 @@ from .delAllTables import *
 from .transferTables import *
 from .tableStats import *
 from .summaryTable import *
+from .filter_tables import filter_tables
