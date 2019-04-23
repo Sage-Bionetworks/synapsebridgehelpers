@@ -62,6 +62,79 @@ def sanitize_table(syn, records, target=None, cols=None):
     return records
 
 
+def compare_schemas(source_cols, target_cols, source_table=None,
+                    target_table=None, rename_threshold=0.9):
+    """Compare two Table schemas to find the differences between them.
+    A difference is either classified as "new" (when the source schema contains
+    a column that the target schema lacks), "removed" (when the target schema
+    contains a column that the source table lacks) "modified", or "renamed".
+    A column is classified as modified if one of the column properties other
+    than `name` has been changed. A column will
+    only be classified as renamed if the table data is provided for each schema.
+    If there is a column in the target table of the same type as a potentially
+    renamed column in the source table, and that column contains a data overlap
+    greater than `rename_threshold`, the column will be classified as renamed.
+
+    Parameters
+    ----------
+    source_cols : list of Synapse.Column
+    target_cols : list of Synapse.Column
+    source_table : pandas.DataFrame
+    target_table : pandas.DataFrame
+    rename_threshold : float
+        When comparing column values between `source_table` and `target_table`,
+        if a proportion greater than the `rename_threshold` is shared between
+        the columns, these column are considered to be the same column, even
+        if they have different names. This results in the columns being labled
+        as "renamed". Values are compared both on actual value and index, up to
+        the length of the shorter column.
+
+    Returns
+    -------
+    A dictionary containing keys:
+
+    new
+    removed
+    modified
+    renamed
+
+    The value of renamed is a key mapping the column name in the target table
+    to the new column name in the source table. The rest of the values are sets.
+    """
+    comparison = {}
+    source_cols_dic = {c["name"]: c for c in source_cols}
+    target_cols_dic = {c["name"]: c for c in target_cols}
+    new_cols = set([c["name"] for c in source_cols if c not in target_cols])
+    removed_cols = set([c["name"] for c in target_cols if c not in source_cols])
+    modified_cols = set([c for c in new_cols if c in removed_cols])
+    for c in modified_cols:
+        new_cols.discard(c)
+        removed_cols.discard(c)
+    renamed_cols = {}
+    if (source_table is not None and target_table is not None and
+        len(new_cols) and len(removed_cols)):
+        for source_col in new_cols:
+            for target_col in removed_cols:
+                if (source_cols_dic[source_col]["columnType"] ==
+                    target_cols_dic[target_col]["columnType"]):
+                    if source_cols_dic[source_col]["columnType"] == "FILEHANDLEID":
+                        raise Exception("A column containing file handles "
+                                        "was potentially renamed.")
+                    overlap = [i == j for i, j in
+                               zip(source_table[source_col],
+                                   target_table[target_col])]
+                    if sum(overlap) / len(overlap) >= rename_threshold:
+                        renamed_cols[target_col] = source_col
+        for target_col, source_col in renamed_cols.items():
+            removed_cols.discard(target_col)
+            new_cols.discard(source_col)
+    comparison["renamed"] = renamed_cols
+    comparison["modified"] = modified_cols
+    comparison["removed"] = removed_cols
+    comparison["new"] = new_cols
+    return comparison
+
+
 def export_tables(syn, table_mapping, target_project=None, update=True,
                   reference_col="recordId", copy_file_handles=True, **kwargs):
     results = {}
@@ -79,6 +152,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
             else:
                 source_table_iter = [(table_mapping[0], source_tables)]
         for source_id, source_table in source_table_iter:
+            source_table = source_table.drop(["ROW_ID", "ROW_VERSION"], axis=1)
             source_table_info = syn.get(source_id)
             source_table_cols = list(syn.getColumns(source_id))
             sanitized_source_table = sanitize_table(
@@ -100,21 +174,25 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                     values = sanitized_source_table)
             target_table = syn.store(target_table)
     elif isinstance(table_mapping, dict): # export to preexisting tables
-        pass
-        # TODO
-        #source_tables = synapsebridgehelpers.filter_tables(
-        #        syn, table_mapping.keys(), **kwargs)
-        #for source, target in table_mapping.items():
-        #    source_table = source_table.asDataFrame().set_index(
-        #            reference_col, drop=False)
-        #    target_table = syn.tableQuery("select * from {}".format(target))
-        #    target_table = target_table.asDataFrame().set_index("recordId", drop=False)
-        #    new_records = source_table.loc[
-        #            source_table.index.difference(target_table.index)]
-        #    if len(new_records): # new records found from the relevant external ids
-        #        new_records = replace_file_handles(syn, new_records, source)
-        #        new_records = sanitize_table(syn, target, new_records)
-        #        new_target_table = sc.Table(target, new_records.values.tolist())
+        source_tables = synapsebridgehelpers.filter_tables(
+                syn, table_mapping.keys(), **kwargs)
+        for source, target in table_mapping.items():
+            source_table = source_tables[source]
+            target_table = syn.tableQuery("select * from {}".format(target))
+            target_table = target_table.asDataFrame()
+            if reference_col is not None:
+                source_table = source_table.set_index(reference_col, drop=False)
+                target_table = target_table.set_index(reference_col, drop=False)
+            if update:
+                source_cols = list(syn.getTableColumns(source))
+                target_cols = list(syn.getTableColumns(target))
+                schema_comparison = compare_schemas(source_cols, target_cols)
+                new_records = source_table.loc[
+                        source_table.index.difference(target_table.index)]
+        #        if len(new_records):
+        #            new_records = replace_file_handles(syn, new_records, source)
+        #            new_records = sanitize_table(syn, target, new_records)
+        #            new_target_table = sc.Table(target, new_records.values.tolist())
         #        try:
         #            syn.store(new_target_table, used = source)
         #        except:
