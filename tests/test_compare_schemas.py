@@ -19,7 +19,7 @@ def test_new_column():
     source_cols = TESTING_TABLE_ORIGINAL_COLS
     target_cols.pop(-1) # raw_data
     result = compare_schemas(source_cols, target_cols)
-    assert result["new"] == set(["raw_data"])
+    assert result["added"] == set(["raw_data"])
 
 def test_removed_column():
     target_cols = TESTING_TABLE_2_ORIGINAL_COLS
@@ -58,7 +58,7 @@ def test_new_removed_column():
     # should be interpreted as added column `raw_data`
     # and dropped column `externalId`
     result = compare_schemas(source_cols, target_cols, source_table, target_table)
-    assert result["new"] == set(["raw_data"])
+    assert result["added"] == set(["raw_data"])
     assert result["removed"] == set(["externalId"])
 
 def test_error_on_renamed_file_column():

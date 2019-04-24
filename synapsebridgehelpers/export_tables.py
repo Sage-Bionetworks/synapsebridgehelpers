@@ -65,7 +65,7 @@ def sanitize_table(syn, records, target=None, cols=None):
 def compare_schemas(source_cols, target_cols, source_table=None,
                     target_table=None, rename_threshold=0.9):
     """Compare two Table schemas to find the differences between them.
-    A difference is either classified as "new" (when the source schema contains
+    A difference is either classified as "added" (when the source schema contains
     a column that the target schema lacks), "removed" (when the target schema
     contains a column that the source table lacks) "modified", or "renamed".
     A column is classified as modified if one of the column properties other
@@ -77,8 +77,8 @@ def compare_schemas(source_cols, target_cols, source_table=None,
 
     Parameters
     ----------
-    source_cols : list of Synapse.Column
-    target_cols : list of Synapse.Column
+    source_cols : list of synapseclient.Column objects
+    target_cols : list of synapseclient.Column objects
     source_table : pandas.DataFrame
     target_table : pandas.DataFrame
     rename_threshold : float
@@ -93,7 +93,7 @@ def compare_schemas(source_cols, target_cols, source_table=None,
     -------
     A dictionary containing keys:
 
-    new
+    added
     removed
     modified
     renamed
@@ -104,16 +104,16 @@ def compare_schemas(source_cols, target_cols, source_table=None,
     comparison = {}
     source_cols_dic = {c["name"]: c for c in source_cols}
     target_cols_dic = {c["name"]: c for c in target_cols}
-    new_cols = set([c["name"] for c in source_cols if c not in target_cols])
+    added_cols = set([c["name"] for c in source_cols if c not in target_cols])
     removed_cols = set([c["name"] for c in target_cols if c not in source_cols])
-    modified_cols = set([c for c in new_cols if c in removed_cols])
+    modified_cols = set([c for c in added_cols if c in removed_cols])
     for c in modified_cols:
-        new_cols.discard(c)
+        added_cols.discard(c)
         removed_cols.discard(c)
     renamed_cols = {}
     if (source_table is not None and target_table is not None and
-        len(new_cols) and len(removed_cols)):
-        for source_col in new_cols:
+        len(added_cols) and len(removed_cols)):
+        for source_col in added_cols:
             for target_col in removed_cols:
                 if (source_cols_dic[source_col]["columnType"] ==
                     target_cols_dic[target_col]["columnType"]):
@@ -127,12 +127,78 @@ def compare_schemas(source_cols, target_cols, source_table=None,
                         renamed_cols[target_col] = source_col
         for target_col, source_col in renamed_cols.items():
             removed_cols.discard(target_col)
-            new_cols.discard(source_col)
+            added_cols.discard(source_col)
     comparison["renamed"] = renamed_cols
     comparison["modified"] = modified_cols
     comparison["removed"] = removed_cols
-    comparison["new"] = new_cols
+    comparison["added"] = added_cols
     return comparison
+
+
+def synchronize_schemas(syn, schema_comparison, source, target,
+                        source_cols=None, target_cols=None):
+    """Update (on Synapse) a target Schema to match a source Schema.
+
+    Parameters
+    ----------
+    syn : synapseclient.Synapse
+    schema_comparison : dict
+    source_table : pandas.DataFrame
+        A dictionary containing (potential) keys:
+
+        added
+        removed
+        modified
+        renamed
+
+        The value of renamed is a key mapping the column name in the target
+        table to the new column name in the source table. The rest of the values
+        are sets. If any of the keys are not relavant (e.g., no columns were
+        modified, thus `modified` is just an empty set), you may omit that key.
+    source : str
+        Synapse ID of a source table on Synapse
+    target : str
+        Synapse ID of a target table on Synapse. The schema of this table will
+        be modified to match that of `source`.
+    source_cols : list of synapseclient.Column objects
+    target_cols : list of synapseclient.Column objects
+
+    Returns
+    -------
+    The synchronized Schema of the target Table.
+    """
+    target_schema = syn.get(target)
+    if source_cols is None:
+        source_cols = syn.getTableColumns(source)
+    if target_cols is None:
+        target_cols = syn.getTableColumns(target)
+    for action, cols in schema_comparison.items():
+        if action == "added":
+            added_columns = list(filter(lambda c : c["name"] in cols,
+                                      source_cols))
+            target_schema.addColumns(added_columns)
+        if action == "removed":
+            removed_columns = filter(lambda c : c["name"] in cols, target_cols)
+            for c in removed_columns:
+                target_schema.removeColumn(c)
+        if action == "modified":
+            modified_source_columns = list(filter(lambda c : c["name"] in cols,
+                                                  source_cols))
+            modified_target_columns = list(filter(lambda c : c["name"] in cols,
+                                                  target_cols))
+            for c in modified_target_columns:
+                target_schema.removeColumn(c)
+            target_schema.addColumns(modified_source_columns)
+        if action == "renamed":
+            for target_name, source_name in cols.items():
+                renamed_source_column = next(
+                        filter(lambda c : c["name"] == source_name, source_cols))
+                renamed_target_column = next(
+                        filter(lambda c : c["name"] == target_name, target_cols))
+                target_schema.removeColumn(renamed_target_column)
+                target_schema.addColumn(renamed_source_column)
+    target_schema = syn.store(target_schema)
+    return target_schema
 
 
 def export_tables(syn, table_mapping, target_project=None, update=True,
@@ -180,10 +246,15 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
             source_table = source_tables[source]
             target_table = syn.tableQuery("select * from {}".format(target))
             target_table = target_table.asDataFrame()
-            if reference_col is not None:
-                source_table = source_table.set_index(reference_col, drop=False)
-                target_table = target_table.set_index(reference_col, drop=False)
             if update:
+                if reference_col is not None:
+                    source_table = source_table.set_index(reference_col, drop=False)
+                    target_table = target_table.set_index(reference_col, drop=False)
+                else:
+                    raise TypeError("If updating target tables with new records "
+                                    "from a source table, you must specify a "
+                                    "reference column as a basis for comparison.")
+                # has the schema changed?
                 source_cols = list(syn.getTableColumns(source))
                 target_cols = list(syn.getTableColumns(target))
                 schema_comparison = compare_schemas(source_cols, target_cols)
