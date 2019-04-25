@@ -3,13 +3,14 @@ import synapseutils as su
 import pandas as pd
 import numpy as np
 import synapsebridgehelpers
+import copy
 
 
-def replace_file_handles(syn, new_records, source, cols=None,
+def replace_file_handles(syn, new_records, source, source_cols=None,
                          content_type = "application/json"):
-    if cols is None:
-        cols = syn.getColumns(source)
-    for c in cols:
+    if source_cols is None:
+        source_cols = syn.getTableColumns(source)
+    for c in source_cols:
         if c["columnType"] == "FILEHANDLEID":
             fhids_to_copy = new_records[c["name"]].dropna().astype(int).tolist()
             new_fhids = []
@@ -61,6 +62,14 @@ def sanitize_table(syn, records, target=None, cols=None):
             records[c["name"]] = list(map(parse_float_to_int, records[c["name"]]))
     return records
 
+
+def dump_on_error(df, e):
+    df.to_csv("target_table_dump.csv", index=False)
+    raise Exception(
+            "There was a problem synchronizing the source and target schemas. "
+            "The target table has been saved to {} in the current directory "
+            "as a precautionary measure".format(
+                "target_table_dump.csv")) from e
 
 def compare_schemas(source_cols, target_cols, source_table=None,
                     target_table=None, rename_threshold=0.9):
@@ -203,6 +212,38 @@ def synchronize_schemas(syn, schema_comparison, source, target,
 
 def export_tables(syn, table_mapping, target_project=None, update=True,
                   reference_col="recordId", copy_file_handles=True, **kwargs):
+    """Export records from one Synapse table to another.
+
+    Parameters
+    ----------
+    syn : synapseclient.Synapse
+    table_mapping : dict, list, or str
+        If exporting records of one or more tables to other, preexisting tables,
+        table_mapping is a dictionary containing Synapse ID key/value mappings
+        from source to target tables. If exporting table records to not yet
+        created tables in a seperate project, table_mapping can be a list or
+        string.
+    target_project : str
+        If exporting table records to not yet created tables in a seperate
+        project, specify the target projects Synapse ID here.
+    update : bool, defaults to True
+        When exporting records of one or more tables to other, preexisting
+        tables, whether to append new records to these tables or completely
+        overwrite the table records.
+    referenceCol : str
+        If `update` is True, use this column as the table index to determine
+        which records are already present in the target table.
+    copy_file_handles : bool, defaults to True
+        Whether to copy the file handles from the source table to the target
+        table. If you are not the creator of these file handles, this must
+        be set to True if you want to a column containing file handles in your
+        target table.
+    **kwargs
+        Additional arguments to pass to synapsebridgehelpers.filter_tables
+
+    Returns
+    -------
+    """
     results = {}
     if isinstance(table_mapping, (list, str)): # export to brand new tables
         if target_project is None:
@@ -218,19 +259,18 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
             else:
                 source_table_iter = [(table_mapping[0], source_tables)]
         for source_id, source_table in source_table_iter:
-            source_table = source_table.drop(["ROW_ID", "ROW_VERSION"], axis=1)
             source_table_info = syn.get(source_id)
-            source_table_cols = list(syn.getColumns(source_id))
+            source_table_cols = list(syn.getTableColumns(source_id))
+            if copy_file_handles:
+                source_table = replace_file_handles(
+                        syn,
+                        new_records = source_table,
+                        source = source_id,
+                        source_cols = source_table_cols)
             sanitized_source_table = sanitize_table(
                     syn,
                     records = source_table,
                     cols = source_table_cols)
-            if copy_file_handles:
-                sanitized_source_table = replace_file_handles(
-                        syn,
-                        new_records = sanitized_source_table,
-                        source = source_id,
-                        cols = source_table_cols)
             target_table_schema = sc.Schema(
                     name = source_table_info["name"],
                     parent = target_project,
@@ -239,13 +279,43 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                     schema = target_table_schema,
                     values = sanitized_source_table)
             target_table = syn.store(target_table)
+            results[source_id] = (target_table.tableId, source_table)
     elif isinstance(table_mapping, dict): # export to preexisting tables
         source_tables = synapsebridgehelpers.filter_tables(
-                syn, table_mapping.keys(), **kwargs)
+                syn, list(table_mapping), **kwargs)
         for source, target in table_mapping.items():
-            source_table = source_tables[source]
+            if isinstance(source_tables, dict):
+                source_table = source_tables[source]
+            else:
+                source_table = source_tables
             target_table = syn.tableQuery("select * from {}".format(target))
             target_table = target_table.asDataFrame()
+            # has the schema changed?
+            source_cols = list(syn.getTableColumns(source))
+            target_cols = list(syn.getTableColumns(target))
+            schema_comparison = compare_schemas(
+                    source_cols = source_cols,
+                    target_cols = target_cols,
+                    source_table = source_table,
+                    target_table = target_table)
+            try: # error after updating schema -> data may be lost on Synapse
+                if len(schema_comparison.values()):
+                    synchronize_schemas(
+                            syn,
+                            schema_comparison = schema_comparison,
+                            source = source,
+                            target = target,
+                            source_cols = source_cols,
+                            target_cols = target_cols)
+                    # synchronize schema of pandas DataFrame with Synapse
+                    for col in schema_comparison["removed"]:
+                        target_table = target_table.drop(col, axis = 1)
+                    for cols in schema_comparison["renamed"]:
+                        target_table = target_table.rename(cols, axis = 1)
+                    target_table = sanitize_table(syn, target_table, target)
+                    syn.store(sc.Table(target, target_table))
+            except Exception as e:
+                dump_on_error(target_table, e)
             if update:
                 if reference_col is not None:
                     source_table = source_table.set_index(reference_col, drop=False)
@@ -254,24 +324,28 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                     raise TypeError("If updating target tables with new records "
                                     "from a source table, you must specify a "
                                     "reference column as a basis for comparison.")
-                # has the schema changed?
-                source_cols = list(syn.getTableColumns(source))
-                target_cols = list(syn.getTableColumns(target))
-                schema_comparison = compare_schemas(source_cols, target_cols)
                 new_records = source_table.loc[
                         source_table.index.difference(target_table.index)]
-        #        if len(new_records):
-        #            new_records = replace_file_handles(syn, new_records, source)
-        #            new_records = sanitize_table(syn, target, new_records)
-        #            new_target_table = sc.Table(target, new_records.values.tolist())
-        #        try:
-        #            syn.store(new_target_table, used = source)
-        #        except:
-        #            print(source)
-        #            print(new_records)
+                if len(new_records):
+                    if (copy_file_handles):
+                        new_records = replace_file_handles(
+                                syn, new_records = new_records, source = source)
+                    new_records = sanitize_table(
+                            syn, records = new_records, target = target)
+                    new_target_table = sc.Table(
+                            target, new_records.values.tolist())
+                    syn.store(new_target_table, used = source)
+                    results[source] = (target, new_records)
+            else:
+                target_table = syn.tableQuery("select * from {}".format(target))
+                syn.delete(target_table.asRowSet())
+                table_to_store = source_table.reset_index(drop=True)
+                syn.store(sc.Table(target, table_to_store))
+                results[source] = (target, table_to_store)
     else:
         raise TypeError("table_mapping must be either a list (if exporting "
                         "tables to a target_project), str (if exporting a single "
                         "table to a project), or a dict (if exporting "
                         "tables to preexisting tables).")
+    return results
 
