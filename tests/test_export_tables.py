@@ -204,3 +204,37 @@ def test_kwargs():
         assert exported_table_no_fh.equals(testing_table_no_fh)
     finally:
         delete_testing_project(syn, project)
+
+def test_schema_change():
+    project = create_testing_project(syn)
+    try:
+        target_table_cols = deepcopy(TESTING_TABLE_ORIGINAL_COLS)
+        added_col = target_table_cols.pop(2)
+        renamed_original_name = target_table_cols[2]["name"]
+        target_table_cols[2]["name"] = "renamed_col"
+        target_table_cols[3]["maximumSize"] = 100
+        schema = sc.Schema(
+                name = TESTING_TABLE_NAME,
+                columns = target_table_cols,
+                parent = project["id"])
+        incomplete_table = deepcopy(
+                 TESTING_TABLE_ORIGINAL.iloc[:len(TESTING_TABLE_ORIGINAL)//2])
+        incomplete_table = incomplete_table.drop(added_col["name"], axis=1)
+        incomplete_table = incomplete_table.rename(
+                {renamed_original_name: "renamed_col"}, axis=1)
+        table = syn.store(sc.Table(schema, incomplete_table))
+        exported_table = export_tables(
+                syn,
+                table_mapping = {TESTING_TABLE: table.tableId},
+                update = False)
+        updated_table = syn.tableQuery("select * from {}".format(table.tableId))
+        updated_table = updated_table.asDataFrame().reset_index(drop = True)
+        updated_table_no_fh = updated_table.drop("raw_data", axis = 1)
+        comparison_table = TESTING_TABLE_ORIGINAL.drop(
+                "raw_data", axis = 1).reset_index(drop = True)
+        updated_table_no_fh = updated_table_no_fh[comparison_table.columns]
+        print(updated_table_no_fh)
+        print(comparison_table)
+        assert updated_table_no_fh.equals(comparison_table)
+    finally:
+        delete_testing_project(syn, project)

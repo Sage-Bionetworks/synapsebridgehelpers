@@ -310,8 +310,8 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                     # synchronize schema of pandas DataFrame with Synapse
                     for col in schema_comparison["removed"]:
                         target_table = target_table.drop(col, axis = 1)
-                    for cols in schema_comparison["renamed"]:
-                        target_table = target_table.rename(cols, axis = 1)
+                    target_table = target_table.rename(
+                            schema_comparison["renamed"], axis = 1)
                     target_table = sanitize_table(syn, target_table, target)
                     syn.store(sc.Table(target, target_table))
             except Exception as e:
