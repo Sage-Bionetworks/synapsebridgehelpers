@@ -239,7 +239,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
         be set to True if you want to a column containing file handles in your
         target table.
     **kwargs
-        Additional arguments to pass to synapsebridgehelpers.filter_tables
+        Additional arguments to pass to synapsebridgehelpers.query_across_tables
 
     Returns
     -------
@@ -249,7 +249,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
         if target_project is None:
             raise TypeError("If passing a list to table_mapping, "
                             "target_project must be set.")
-        source_tables = synapsebridgehelpers.filter_tables(
+        source_tables = synapsebridgehelpers.query_across_tables(
                 syn, tables=table_mapping, as_data_frame=True, **kwargs)
         if isinstance(source_tables, dict):
             source_table_iter = source_tables.items()
@@ -281,7 +281,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
             target_table = syn.store(target_table)
             results[source_id] = (target_table.tableId, source_table)
     elif isinstance(table_mapping, dict): # export to preexisting tables
-        source_tables = synapsebridgehelpers.filter_tables(
+        source_tables = synapsebridgehelpers.query_across_tables(
                 syn, list(table_mapping), **kwargs)
         for source, target in table_mapping.items():
             if isinstance(source_tables, dict):
