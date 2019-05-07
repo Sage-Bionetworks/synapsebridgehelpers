@@ -1,7 +1,4 @@
-import synapseclient as sc
 import synapseutils as su
-import numpy as np
-import pandas as pd
 
 def copyFileIdsInBatch(syn, table_id, fileIds, content_type = "application/json"):
     """Copy file handles from a pandas.Series object.

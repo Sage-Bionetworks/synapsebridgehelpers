@@ -1,13 +1,26 @@
-import synapseclient as sc
-import synapseutils as su
-import pandas as pd
-import numpy as np
 import synapsebridgehelpers
-import copy
+import synapseclient as sc
+import numpy as np
 
 
 def replace_file_handles(syn, df, source_table_id, source_table_cols=None,
                          content_type = "application/json"):
+    """Replace the file handles in columns of type 'FILEHANDLEID'
+
+    Parameters
+    ----------
+    syn : synapseclient.Synapse
+    df : pandas.DataFrame
+    source_table_id : str
+        Synapse ID of the table the original file handles belong to.
+    source_table_cols : iterable of synapseclient.Column objects
+    content_type : str
+
+    Returns
+    -------
+    The pandas.DataFrame `df` but with new file handle values in columns
+    of type 'FILEHANDLEID' within the source table.
+    """
     if source_table_cols is None:
         source_table_cols = syn.getTableColumns(source_table_id)
     for c in source_table_cols:
@@ -25,7 +38,7 @@ def replace_file_handles(syn, df, source_table_id, source_table_cols=None,
 
 def parse_float_to_int(i):
     str_i = str(i)
-    if "nan" == str_i:
+    if str_i == "nan":
         str_i = None
     elif str_i.endswith(".0"):
         str_i = str_i[:-2]
@@ -38,10 +51,6 @@ def sanitize_table(syn, records, target=None, cols=None):
     if cols is None:
         cols = syn.getTableColumns(target)
     for c in cols:
-        #if c['columnType'] == 'STRING':
-        #    if ('timezone' in c['name'] and
-        #        type(records[c['name']].iloc[0]) is np.float64):
-        #        records[c['name']] = list(map(parse_float_to_int, records[c['name']]))
         if (c["columnType"] in ["INTEGER", "DATE", "FILEHANDLEID", "USER"] and
             isinstance(records[c["name"]].iloc[0], np.float64)):
             records[c["name"]] = list(map(parse_float_to_int, records[c["name"]]))
@@ -98,9 +107,9 @@ def compare_schemas(source_cols, target_cols, source_table=None,
     comparison = {}
     source_cols_dic = {c["name"]: c for c in source_cols}
     target_cols_dic = {c["name"]: c for c in target_cols}
-    added_cols = set([c["name"] for c in source_cols if c not in target_cols])
-    removed_cols = set([c["name"] for c in target_cols if c not in source_cols])
-    modified_cols = set([c for c in added_cols if c in removed_cols])
+    added_cols = {c["name"] for c in source_cols if c not in target_cols}
+    removed_cols = {c["name"] for c in target_cols if c not in source_cols}
+    modified_cols = {c for c in added_cols if c in removed_cols}
     for c in modified_cols:
         added_cols.discard(c)
         removed_cols.discard(c)

@@ -1,6 +1,6 @@
+import multiprocessing
 import synapseclient as sc
 import pandas as pd
-import multiprocessing
 
 def get_tables(syn, projectId, simpleNameFilters=[]):
     """Returns all the tables in a projects as a dataFrame with
@@ -52,7 +52,7 @@ def safe_query(query_str, syn, continueOnMissingColumn):
 def query_across_tables(syn, tables, query=None,
                         substudy=None, identifier=None,
                         substudy_col="substudyMemberships",
-                        identifier_col="externalId", as_data_frame = True,
+                        identifier_col="externalId", as_data_frame=True,
                         continueOnMissingColumn=True):
     """Retrieve all records that match a filtering criteria. Two convenience
     parameters (substudy and identifier) are provided to filter by one or more

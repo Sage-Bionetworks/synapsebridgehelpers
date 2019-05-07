@@ -1,5 +1,5 @@
-import synapseclient as sc
 import pytest
+import synapseclient as sc
 from synapsebridgehelpers import query_across_tables
 
 syn = sc.login()
