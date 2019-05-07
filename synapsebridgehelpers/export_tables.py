@@ -6,36 +6,21 @@ import synapsebridgehelpers
 import copy
 
 
-def replace_file_handles(syn, new_records, source, source_cols=None,
+def replace_file_handles(syn, df, source_table_id, source_table_cols=None,
                          content_type = "application/json"):
-    if source_cols is None:
-        source_cols = syn.getTableColumns(source)
-    for c in source_cols:
+    if source_table_cols is None:
+        source_table_cols = syn.getTableColumns(source_table_id)
+    for c in source_table_cols:
         if c["columnType"] == "FILEHANDLEID":
-            fhids_to_copy = new_records[c["name"]].dropna().astype(int).tolist()
-            new_fhids = []
-            for i in range(0, len(fhids_to_copy), 100):
-                fhids_to_copy_i = fhids_to_copy[i:i+100]
-                new_fhids_i = su.copyFileHandles(
-                        syn = syn,
-                        fileHandles = fhids_to_copy_i,
-                        associateObjectTypes = ["TableEntity"] * len(fhids_to_copy_i),
-                        associateObjectIds = [source] * len(fhids_to_copy_i),
-                        contentTypes = [content_type] * len(fhids_to_copy_i),
-                        fileNames = [None] * len(fhids_to_copy_i))
-                for j in [int(i["newFileHandle"]["id"]) for i in new_fhids_i["copyResults"]]:
-                    new_fhids.append(j)
-            new_fhids = pd.DataFrame(
-                    {c["name"]: fhids_to_copy,
-                     "new_fhids": new_fhids})
-            new_records = new_records.merge(new_fhids, how="left", on=c["name"])
-            new_records[c["name"]] = new_records["new_fhids"]
-            new_records = new_records.drop("new_fhids", axis = 1)
-            new_records = new_records.drop_duplicates(subset = "recordId")
-        elif c["columnType"] not in ["INTEGER", "DOUBLE"]:
-            new_records[c["name"]] = [
-                    None if pd.isnull(i) else i for i in new_records[c["name"]]]
-    return new_records
+            fhid_map = synapsebridgehelpers.copyFileIdsInBatch(
+                    syn,
+                    table_id = source_table_id,
+                    fileIds = df[c["name"]],
+                    content_type = content_type)
+            fhid_map = {str(k): str(v) for k, v in fhid_map.items()}
+            df[c["name"]] = df[c["name"]].apply(
+                    parse_float_to_int).map(fhid_map)
+    return df
 
 
 def parse_float_to_int(i):
@@ -64,7 +49,7 @@ def sanitize_table(syn, records, target=None, cols=None):
 
 
 def dump_on_error(df, e):
-    df.to_csv("target_table_dump.csv", index=False)
+    df.to_csv("target_table_dump.csv")
     raise Exception(
             "There was a problem synchronizing the source and target schemas. "
             "The target table has been saved to {} in the current directory "
@@ -212,7 +197,8 @@ def synchronize_schemas(syn, schema_comparison, source, target,
 
 def export_tables(syn, table_mapping, target_project=None, update=True,
                   reference_col="recordId", copy_file_handles=True, **kwargs):
-    """Export records from one Synapse table to another.
+    """Export records from one Synapse table to another. Or transfer tables
+    to completely new tables in a separate project.
 
     Parameters
     ----------
@@ -251,22 +237,16 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                             "target_project must be set.")
         source_tables = synapsebridgehelpers.query_across_tables(
                 syn, tables=table_mapping, as_data_frame=True, **kwargs)
-        if isinstance(source_tables, dict):
-            source_table_iter = source_tables.items()
-        else: # table_mapping is only a single table
-            if isinstance(table_mapping, str):
-                source_table_iter = [(table_mapping, source_tables)]
-            else:
-                source_table_iter = [(table_mapping[0], source_tables)]
+        source_table_iter = source_tables.items()
         for source_id, source_table in source_table_iter:
             source_table_info = syn.get(source_id)
             source_table_cols = list(syn.getTableColumns(source_id))
             if copy_file_handles:
                 source_table = replace_file_handles(
                         syn,
-                        new_records = source_table,
-                        source = source_id,
-                        source_cols = source_table_cols)
+                        df = source_table,
+                        source_table_id = source_id,
+                        source_table_cols = source_table_cols)
             sanitized_source_table = sanitize_table(
                     syn,
                     records = source_table,
@@ -281,13 +261,11 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
             target_table = syn.store(target_table)
             results[source_id] = (target_table.tableId, source_table)
     elif isinstance(table_mapping, dict): # export to preexisting tables
+        tables = list(table_mapping)
         source_tables = synapsebridgehelpers.query_across_tables(
-                syn, list(table_mapping), **kwargs)
+                syn, tables, **kwargs)
         for source, target in table_mapping.items():
-            if isinstance(source_tables, dict):
-                source_table = source_tables[source]
-            else:
-                source_table = source_tables
+            source_table = source_tables[source]
             target_table = syn.tableQuery("select * from {}".format(target))
             target_table = target_table.asDataFrame()
             # has the schema changed?
@@ -329,7 +307,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                 if len(new_records):
                     if (copy_file_handles):
                         new_records = replace_file_handles(
-                                syn, new_records = new_records, source = source)
+                                syn, df = new_records, source_table_id = source)
                     new_records = sanitize_table(
                             syn, records = new_records, target = target)
                     new_target_table = sc.Table(

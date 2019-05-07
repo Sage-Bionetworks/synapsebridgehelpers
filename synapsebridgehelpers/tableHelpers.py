@@ -1,7 +1,6 @@
 import synapseclient as sc
 import pandas as pd
 import multiprocessing
-import warnings
 
 def get_tables(syn, projectId, simpleNameFilters=[]):
     """Returns all the tables in a projects as a dataFrame with
@@ -51,12 +50,12 @@ def safe_query(query_str, syn, continueOnMissingColumn):
             raise Exception("Invalid query:\n\n{}".format(query_str)) from e
 
 def query_across_tables(syn, tables, query=None,
-                        substudy=None, external_id=None,
+                        substudy=None, identifier=None,
                         substudy_col="substudyMemberships",
-                        external_id_col="externalId", as_data_frame = True,
+                        identifier_col="externalId", as_data_frame = True,
                         continueOnMissingColumn=True):
     """Retrieve all records that match a filtering criteria. Two convenience
-    parameters (substudy and external_id) are provided to filter by one or more
+    parameters (substudy and identifier) are provided to filter by one or more
     values of that respective parameter. The filtering criteria use logical
     conjunction (AND), meaning rows will only be returned if they match all
     the filtering criteria.
@@ -75,30 +74,28 @@ def query_across_tables(syn, tables, query=None,
     substudy : str or array-like
         Matches if `substudy_col` contains one or more of these arguments.
         (Uses SQL LIKE).
-    external_id : str or array-like
-        Matches if `external_id_col` is equal to (str) or contained in (list)
-        this argument. (Uses SQL IN).
+    identifier : str, array-like, or function
+        Matches if `identifier_col` is equal to (str) or contained in (list)
+        or satisfies (function) this argument.
     substudy_col : str
         The column to reference for the `substudy` parameter.
-    external_id_col : str
-        The column to reference for the `external_id` parameter.
+    identifier_col : str
+        The column to reference for the `identifier` parameter.
     as_data_frame : boolean, default True
         Return the results as pandas DataFrames, rather than
         synapseclient.tableQuery objects.
 
     Returns
     -------
-    If `tables` is a str, returns a pandas DataFrame.
-    If `tables` is a list, returns a dict where the keys are Synapse IDs and
-    the values are pandas DataFrames.
+    A dict where the keys are Synapse IDs and the values are pandas DataFrames.
     """
     filtered_tables = {}
-    if isinstance(query, str):
-        warnings.warn("The passed `query` is a string and will be passed "
-                      "directly to the client. If you want to enable other "
-                      "parameters of this function, do not use the `query` "
-                      "parameter or pass a list of SQL logical WHERE criteria "
-                      "to the `query` parameter.")
+    if isinstance(query, str) and (substudy is not None or identifier is not None):
+        raise Exception("If `query` is a string, no other filtering parameters "
+                        "may be set. If you want to enable other filtering "
+                        "parameters, do not use the `query` parameter or "
+                        "pass a list of SQL logical WHERE criteria "
+                        "to the `query` parameter.")
     if isinstance(tables, str):
         tables = [tables]
     if substudy is not None:
@@ -106,10 +103,16 @@ def query_across_tables(syn, tables, query=None,
             substudy = [substudy]
         substudy_list = ["{} LIKE '%{}%'".format(substudy_col, s) for s in substudy]
         substudy_str = "({})".format(" OR ".join(substudy_list))
-    if external_id is not None:
-        if isinstance(external_id, str):
-            external_id = [external_id]
-        external_id_str = "('{}')".format("', '".join(external_id))
+    if identifier is not None:
+        if isinstance(identifier, str):
+            identifier = [identifier]
+        if isinstance(identifier, list):
+            identifier_str = "('{}')".format("', '".join(identifier))
+        elif callable(identifier):
+            identifier_str = None
+            if not as_data_frame:
+                raise Exception("If `identifier` is a function, "
+                                "`as_data_frame` must be True.")
     queries = []
     for t in tables:
         if isinstance(query, str):
@@ -117,17 +120,18 @@ def query_across_tables(syn, tables, query=None,
         else:
             query_str = "SELECT * FROM {}".format(t)
             if (query is not None or substudy is not None
-                    or external_id is not None):
+                    or (identifier is not None and identifier_str is not None)):
                 query_str = "{} WHERE".format(query_str)
             if substudy is not None:
                 query_str = "{} {}".format(query_str, substudy_str)
-            if external_id is not None:
+            if (identifier is not None and identifier_col is not None
+                    and identifier_str is not None):
                 if substudy is not None:
                     query_str = "{} AND".format(query_str)
                 query_str = "{} {} IN {}".format(
-                        query_str, external_id_col, external_id_str)
+                        query_str, identifier_col, identifier_str)
             if query is not None:
-                if substudy is not None or external_id is not None:
+                if substudy is not None or identifier is not None:
                     query_str = "{} AND".format(query_str)
                 query_str = "{} {}".format(query_str, " AND ".join(query))
             queries.append(query_str)
@@ -135,7 +139,12 @@ def query_across_tables(syn, tables, query=None,
     filtered_tables = mp.map(
             lambda q : safe_query(q, syn, continueOnMissingColumn), queries)
     if as_data_frame:
-        filtered_tables = [q.asDataFrame()
-                           for q in filtered_tables]
+        filtered_tables = [q.asDataFrame() for q in filtered_tables]
+        if callable(identifier):
+            filtered_tables = [df[list(map(identifier, df[identifier_col]))]
+                               for df in filtered_tables]
+        filtered_tables = {t: df for t, df in zip(tables, filtered_tables)}
+    else:
+        filtered_tables = {t: q for t, q in zip(tables, filtered_tables)}
     return filtered_tables
 

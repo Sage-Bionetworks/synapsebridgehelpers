@@ -6,4 +6,5 @@ from .delAllTables import *
 from .transferTables import *
 from .tableStats import *
 from .summaryTable import *
-from .export_tables import export_tables, compare_schemas, synchronize_schemas
+from .export_tables import (export_tables, compare_schemas, synchronize_schemas,
+                            replace_file_handles)
