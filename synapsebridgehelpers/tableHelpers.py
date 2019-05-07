@@ -143,8 +143,5 @@ def query_across_tables(syn, tables, query=None,
         if callable(identifier):
             filtered_tables = [df[list(map(identifier, df[identifier_col]))]
                                for df in filtered_tables]
-        filtered_tables = {t: df for t, df in zip(tables, filtered_tables)}
-    else:
-        filtered_tables = {t: q for t, q in zip(tables, filtered_tables)}
     return filtered_tables
 
