@@ -47,7 +47,8 @@ def safe_query(query_str, syn, continueOnMissingColumn):
         if e.response.status_code == 400 and continueOnMissingColumn:
             return
         else:
-            raise Exception("Invalid query:\n\n{}".format(query_str)) from e
+            raise sc.exceptions.SynapseHTTPError(
+                    "Invalid query:\n\n{}".format(query_str)) from e
 
 def query_across_tables(syn, tables, query=None,
                         substudy=None, identifier=None,
@@ -68,7 +69,8 @@ def query_across_tables(syn, tables, query=None,
     query : str or array-like
         If a string, a raw query with an unassigned string in the from clause.
         E.g. "select foo from %s". If a list, a list of SQL WHERE statements
-        compatible with Synapse Table querying. If passing query as a string,
+        compatible with Synapse Table querying -- for example,
+        ["dataGroups = 'PD'", "age > 35"]. If passing query as a string,
         the query will not be modified even when setting other function
         parameters.
     substudy : str or array-like
@@ -76,10 +78,15 @@ def query_across_tables(syn, tables, query=None,
         (Uses SQL LIKE).
     identifier : str, array-like, or function
         Matches if `identifier_col` is equal to (str) or contained in (list)
-        or satisfies (function) this argument.
-    substudy_col : str
+        or satisfies (function) this argument. For example:
+        identifier="ABC-123" -- matches iff `identifier_col` == "ABC-123"
+        identifier=["ABC-123", "DEF-456"] -- matches iff
+            `identifier_col` is in list ["ABC-123", "DEF-456"]
+        identifier=lambda s : s.startswith("ABC") -- matches iff
+            `identifier_col` starts with the string "ABC".
+    substudy_col : str, default "substudyMemberships"
         The column to reference for the `substudy` parameter.
-    identifier_col : str
+    identifier_col : str, default "externalId"
         The column to reference for the `identifier` parameter.
     as_data_frame : boolean, default True
         Return the results as pandas DataFrames, rather than
@@ -87,11 +94,12 @@ def query_across_tables(syn, tables, query=None,
 
     Returns
     -------
-    A dict where the keys are Synapse IDs and the values are pandas DataFrames.
+    A list of pandas DataFrames or synapseclient.table.CsvFileTable
+    (if as_data_frame = False).
     """
     filtered_tables = {}
     if isinstance(query, str) and (substudy is not None or identifier is not None):
-        raise Exception("If `query` is a string, no other filtering parameters "
+        raise TypeError("If `query` is a string, no other filtering parameters "
                         "may be set. If you want to enable other filtering "
                         "parameters, do not use the `query` parameter or "
                         "pass a list of SQL logical WHERE criteria "
@@ -111,30 +119,28 @@ def query_across_tables(syn, tables, query=None,
         elif callable(identifier):
             identifier_str = None
             if not as_data_frame:
-                raise Exception("If `identifier` is a function, "
+                raise TypeError("If `identifier` is a function, "
                                 "`as_data_frame` must be True.")
-    queries = []
-    for t in tables:
-        if isinstance(query, str):
-            queries.append(query % t)
-        else:
-            query_str = "SELECT * FROM {}".format(t)
-            if (query is not None or substudy is not None
-                    or (identifier is not None and identifier_str is not None)):
-                query_str = "{} WHERE".format(query_str)
+    if isinstance(query, str):
+        query_str = query
+    else:
+        query_str = "SELECT * FROM {}"
+        if (query is not None or substudy is not None
+                or (identifier is not None and identifier_str is not None)):
+            query_str = "{} WHERE".format(query_str)
+        if substudy is not None:
+            query_str = "{} {}".format(query_str, substudy_str)
+        if (identifier is not None and identifier_col is not None
+                and identifier_str is not None):
             if substudy is not None:
-                query_str = "{} {}".format(query_str, substudy_str)
-            if (identifier is not None and identifier_col is not None
-                    and identifier_str is not None):
-                if substudy is not None:
-                    query_str = "{} AND".format(query_str)
-                query_str = "{} {} IN {}".format(
-                        query_str, identifier_col, identifier_str)
-            if query is not None:
-                if substudy is not None or identifier is not None:
-                    query_str = "{} AND".format(query_str)
-                query_str = "{} {}".format(query_str, " AND ".join(query))
-            queries.append(query_str)
+                query_str = "{} AND".format(query_str)
+            query_str = "{} {} IN {}".format(
+                    query_str, identifier_col, identifier_str)
+        if query is not None:
+            if substudy is not None or identifier is not None:
+                query_str = "{} AND".format(query_str)
+            query_str = "{} {}".format(query_str, " AND ".join(query))
+    queries = [query_str.format(t) for t in tables]
     mp = multiprocessing.dummy.Pool(8)
     filtered_tables = mp.map(
             lambda q : safe_query(q, syn, continueOnMissingColumn), queries)
