@@ -1,0 +1,7 @@
+recordId,externalId,substudyMemberships,bool_property,str_property
+123,ABC,my-study=ABC,True,blue
+234,BCD,my-study=BCD,False,blue
+345,CDE,my-study=CDE,True,red
+456,DEF,other-study=DEF,True,blue
+567,EFG,other-study=EFG,False,blue
+678,FGH,other-study=FGH,True,red
