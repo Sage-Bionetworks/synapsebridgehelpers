@@ -91,6 +91,9 @@ def query_across_tables(syn, tables, query=None,
     as_data_frame : boolean, default True
         Return the results as pandas DataFrames, rather than
         synapseclient.tableQuery objects.
+    continueOnMissingColumn : boolean, default True
+        If one of the tables is missing a column that is being queried upon,
+        return a None object rather than raising an exception.
 
     Returns
     -------
