@@ -7,7 +7,7 @@ def test_new_column(tables):
     source_cols = tables["columns"][0]
     target_cols.pop(-1) # raw_data
     result = compare_schemas(source_cols, target_cols)
-    assert result["added"] == set(["raw_data"])
+    result["added"] == set(["raw_data"])
 
 def test_removed_column(tables):
     target_cols = tables["columns"][1]

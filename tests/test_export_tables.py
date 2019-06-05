@@ -1,6 +1,7 @@
-import synapseclient as sc
 import pytest
 import uuid
+import synapseclient as sc
+import pandas as pd
 from synapsebridgehelpers import export_tables
 from copy import deepcopy
 
@@ -15,7 +16,7 @@ def test_export_one_table_to_new(syn, new_project, tables, sample_table):
             "raw_data", axis = 1).reset_index(drop = True)
     testing_table_no_fh = sample_table.drop(
             "raw_data", axis = 1).reset_index(drop = True)
-    assert exported_table_no_fh.equals(testing_table_no_fh)
+    pd.testing.assert_frame_equal(exported_table_no_fh, testing_table_no_fh)
 
 def test_export_one_table_to_new_no_filehandles(syn, new_project, tables, sample_table):
     source_table = tables["schema"][0]["id"]
@@ -25,7 +26,7 @@ def test_export_one_table_to_new_no_filehandles(syn, new_project, tables, sample
             target_project = new_project["id"],
             copy_file_handles = False)
     exported_table[source_table][1].reset_index(drop=True, inplace=True)
-    assert exported_table[source_table][1].equals(sample_table)
+    pd.testing.assert_frame_equal(exported_table[source_table][1], sample_table)
 
 def test_export_one_table_to_preexisting_update(syn, new_project, tables, sample_table):
     source_table = tables["schema"][0]["id"]
@@ -50,7 +51,7 @@ def test_export_one_table_to_preexisting_update(syn, new_project, tables, sample
             "raw_data", axis = 1).reset_index(drop = True)
     print("returned results \n", updated_table_no_fh)
     print("correct result \n", correct_table_no_fh)
-    assert updated_table_no_fh.equals(correct_table_no_fh)
+    pd.testing.assert_frame_equal(updated_table_no_fh, correct_table_no_fh)
 
 def test_export_one_table_to_preexisting_no_update(syn, new_project, tables, sample_table):
     source_table = tables["schema"][0]["id"]
@@ -72,7 +73,7 @@ def test_export_one_table_to_preexisting_no_update(syn, new_project, tables, sam
             "raw_data", axis = 1).reset_index(drop = True)
     print(updated_table_no_fh)
     print(comparison_table)
-    assert updated_table_no_fh.equals(comparison_table)
+    pd.testing.assert_frame_equal(updated_table_no_fh, comparison_table)
 
 def test_export_multiple_tables_to_new(syn, new_project, tables, sample_table):
     source_table = tables["schema"][0]["id"]
@@ -154,7 +155,7 @@ def test_kwargs(syn, tables, new_project, sample_table):
     to_keep = ["my-study" in s for s in
                testing_table_no_fh.substudyMemberships.values]
     testing_table_no_fh = testing_table_no_fh.loc[to_keep]
-    assert exported_table_no_fh.equals(testing_table_no_fh)
+    pd.testing.assert_frame_equal(exported_table_no_fh, testing_table_no_fh)
 
 def test_schema_change(syn, tables, new_project, sample_table):
     source_table = tables["schema"][0]["id"]
@@ -185,4 +186,4 @@ def test_schema_change(syn, tables, new_project, sample_table):
     updated_table_no_fh = updated_table_no_fh[comparison_table.columns]
     print(updated_table_no_fh)
     print(comparison_table)
-    assert updated_table_no_fh.equals(comparison_table)
+    pd.testing.assert_frame_equal(updated_table_no_fh, comparison_table)

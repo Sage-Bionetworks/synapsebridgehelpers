@@ -36,7 +36,6 @@ def new_project(syn):
     project = syn.store(project)
     yield project
     syn.delete(project)
-    return project
 
 
 @pytest.fixture(scope='session')
@@ -45,7 +44,6 @@ def project(syn):
     project = syn.store(project)
     yield project
     syn.delete(project)
-    return project
 
 
 def file_(syn, parent):
@@ -57,8 +55,7 @@ def file_(syn, parent):
     file_ = syn.store(file_)
     return file_
 
-
-def table_schema(project):
+def table_schema(project_obj):
     cols = [synapseclient.Column(name="recordId", columnType="INTEGER"),
             synapseclient.Column(name="externalId", columnType="STRING"),
             synapseclient.Column(name="substudyMemberships", columnType="STRING"),
@@ -67,7 +64,7 @@ def table_schema(project):
             synapseclient.Column(name="raw_data", columnType="FILEHANDLEID")]
     schema = synapseclient.Schema(name = str(uuid.uuid4()),
                                   columns = cols,
-                                  parent = project["id"])
+                                  parent = project_obj["id"])
     return schema
 
 
@@ -88,6 +85,16 @@ def tables(syn, project, sample_table):
     # store a sample table
     schemas = [table(syn, project, sample_table, table_schema(project))
                for i in range(2)]
+    columns = [list(syn.getColumns(t["id"])) for t in schemas]
+    tables = {"schema": schemas, "columns": columns}
+    return tables
+
+@pytest.fixture
+def new_tables(syn, sample_table, new_project):
+    # store a sample table
+    schemas = [table(syn, new_project, sample_table, table_schema(new_project))
+               for i in range(2)]
+    schemas = [syn.get(s["id"]) for s in schemas]
     columns = [list(syn.getColumns(t["id"])) for t in schemas]
     tables = {"schema": schemas, "columns": columns}
     return tables
