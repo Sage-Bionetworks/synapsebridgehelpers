@@ -270,8 +270,8 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
         When exporting records of one or more tables to other, preexisting
         tables, whether to append new records to these tables or completely
         overwrite the table records.
-    referenceCol : str
-        If `update` is True, use this column as the table index to determine
+    reference_col : str or list
+        If `update` is True, use this column(s) as the table index to determine
         which records are already present in the target table.
     copy_file_handles : bool, default True
         Whether to copy the file handles from the source table to the target
