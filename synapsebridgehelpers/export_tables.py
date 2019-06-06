@@ -251,8 +251,8 @@ def synchronize_schemas(syn, schema_comparison, source, target,
 
 def export_tables(syn, table_mapping, target_project=None, update=True,
                   reference_col="recordId", copy_file_handles=True, **kwargs):
-    """Export records from one Synapse table to another. Or transfer tables
-    to completely new tables in a separate project.
+    """Copy rows from one Synapse table to another. Or copy tables
+    to a new table in a separate project.
 
     Parameters
     ----------
