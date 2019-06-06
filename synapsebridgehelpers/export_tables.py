@@ -46,7 +46,7 @@ def parse_float_to_int(i):
     return str_i
 
 
-def _sanitize_table(syn, records, target=None, cols=None):
+def _sanitize_dataframe(syn, records, target=None, cols=None):
     """Format the values and dtypes of a pandas DataFrame so that it may be
     uploaded to Synapse as a Table.
 
@@ -304,7 +304,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                         df = source_table,
                         source_table_id = source_id,
                         source_table_cols = source_table_cols)
-            sanitized_source_table = _sanitize_table(
+            sanitized_source_table = _sanitize_dataframe(
                     syn,
                     records = source_table,
                     cols = source_table_cols)
@@ -348,7 +348,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                         target_table = target_table.drop(col, axis = 1)
                     target_table = target_table.rename(
                             schema_comparison["renamed"], axis = 1)
-                    target_table = _sanitize_table(syn, target_table, target)
+                    target_table = _sanitize_dataframe(syn, target_table, target)
                     syn.store(sc.Table(target, target_table))
             except Exception as e:
                 dump_on_error(target_table, e, syn, source, target)
@@ -366,7 +366,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                     if (copy_file_handles):
                         new_records = replace_file_handles(
                                 syn, df = new_records, source_table_id = source)
-                    new_records = _sanitize_table(
+                    new_records = _sanitize_dataframe(
                             syn, records = new_records, target = target)
                     new_target_table = sc.Table(
                             target, new_records.values.tolist())
