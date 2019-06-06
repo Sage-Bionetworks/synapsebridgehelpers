@@ -45,7 +45,25 @@ def parse_float_to_int(i):
     return str_i
 
 
-def sanitize_table(syn, records, target=None, cols=None):
+def _sanitize_table(syn, records, target=None, cols=None):
+    """Format the values and dtypes of a pandas DataFrame so that it may be
+    uploaded to Synapse as a Table.
+
+    Parameters
+    ----------
+    syn : synapseclient.Synapse
+    records : pandas.DataFrame
+    target : str
+        Synapse ID where `records` will be stored to.
+    cols : list of synapseclient.Column
+        The Column objects of the Synapse Table where `records` will be
+        stored to.
+
+    Returns
+    -------
+    A pandas DataFrame with values and their dtypes modified in a way that
+    allows them to be stored to Synapse as a Table.
+    """
     if cols is None and target is None:
         raise TypeError("Either target or cols must be set.")
     if cols is None:
@@ -121,8 +139,9 @@ def compare_schemas(source_cols, target_cols, source_table=None,
                 if (source_cols_dic[source_col]["columnType"] ==
                     target_cols_dic[target_col]["columnType"]):
                     if source_cols_dic[source_col]["columnType"] == "FILEHANDLEID":
-                        raise Exception("A column containing file handles "
-                                        "was potentially renamed.")
+                        raise sc.exceptions.SynapseMalformedEntityError(
+                                "A column containing file handles "
+                                "was potentially renamed.")
                     overlap = [i == j for i, j in
                                zip(source_table[source_col],
                                    target_table[target_col])]
@@ -218,23 +237,23 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
         from source to target tables. If exporting table records to not yet
         created tables in a seperate project, table_mapping can be a list or
         string.
-    target_project : str
+    target_project : str, default None
         If exporting table records to not yet created tables in a seperate
-        project, specify the target projects Synapse ID here.
-    update : bool, defaults to True
+        project, specify the target project's Synapse ID here.
+    update : bool, default True
         When exporting records of one or more tables to other, preexisting
         tables, whether to append new records to these tables or completely
         overwrite the table records.
     referenceCol : str
         If `update` is True, use this column as the table index to determine
         which records are already present in the target table.
-    copy_file_handles : bool, defaults to True
+    copy_file_handles : bool, default True
         Whether to copy the file handles from the source table to the target
         table. If you are not the creator of these file handles, this must
         be set to True if you want to a column containing file handles in your
         target table.
     **kwargs
-        Additional arguments to pass to synapsebridgehelpers.query_across_tables
+        Additional named arguments to pass to synapsebridgehelpers.query_across_tables
 
     Returns
     -------
@@ -259,7 +278,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                         df = source_table,
                         source_table_id = source_id,
                         source_table_cols = source_table_cols)
-            sanitized_source_table = sanitize_table(
+            sanitized_source_table = _sanitize_table(
                     syn,
                     records = source_table,
                     cols = source_table_cols)
@@ -303,7 +322,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                         target_table = target_table.drop(col, axis = 1)
                     target_table = target_table.rename(
                             schema_comparison["renamed"], axis = 1)
-                    target_table = sanitize_table(syn, target_table, target)
+                    target_table = _sanitize_table(syn, target_table, target)
                     syn.store(sc.Table(target, target_table))
             except Exception as e:
                 dump_on_error(target_table, e)
@@ -321,7 +340,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                     if (copy_file_handles):
                         new_records = replace_file_handles(
                                 syn, df = new_records, source_table_id = source)
-                    new_records = sanitize_table(
+                    new_records = _sanitize_table(
                             syn, records = new_records, target = target)
                     new_target_table = sc.Table(
                             target, new_records.values.tolist())
