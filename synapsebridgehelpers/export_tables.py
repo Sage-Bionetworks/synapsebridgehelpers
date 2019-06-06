@@ -190,18 +190,19 @@ def synchronize_schemas(syn, schema_comparison, source, target,
     ----------
     syn : synapseclient.Synapse
     schema_comparison : dict
-    source_table : pandas.DataFrame
-        A dictionary containing (potential) keys:
+        Normally the returned object from a call to `compare_schemas`.
+
+        A dictionary containing keys:
 
         added
         removed
         modified
         renamed
 
-        The value of renamed is a key mapping the column name in the target
-        table to the new column name in the source table. The rest of the values
-        are sets. If any of the keys are not relavant (e.g., no columns were
+        If any of the keys are not relavant (e.g., no columns were
         modified, thus `modified` is just an empty set), you may omit that key.
+        The value of renamed is a key mapping the column name in the target table
+        to the new column name in the source table. The rest of the values are sets.
     source : str
         Synapse ID of a source table on Synapse
     target : str
