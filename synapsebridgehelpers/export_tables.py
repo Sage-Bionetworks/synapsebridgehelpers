@@ -1,3 +1,4 @@
+import os
 import synapsebridgehelpers
 import synapseclient as sc
 import numpy as np
@@ -75,8 +76,32 @@ def _sanitize_table(syn, records, target=None, cols=None):
     return records
 
 
-def dump_on_error(df, e):
-    df.to_csv("target_table_dump.csv")
+def dump_on_error(df, e, syn, source_table, target_table):
+    """Write `df` to the current directory, send an email to the current
+    Synapse user, and raise an exception.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+    e : Exception
+    syn : synapseclient.Synapse
+    source_table : str
+    target_table : str
+
+    Returns
+    -------
+    None
+    """
+    dump_name = "target_table_dump.csv"
+    df.to_csv(dump_name)
+    this_user = syn.getUserProfile()
+    syn.sendMessage(userIds=[this_user["ownerId"]],
+                    messageSubject="Failed Table Export",
+                    messageBody="There was a failed attempt to export table {0} "
+                                "to table {1} after an attempted schema change "
+                                "to {1}. The contents of {1} have been written "
+                                "to {2}.".format(source_table, target_table,
+                                    os.path.join(os.getcwd(), dump_name)))
     raise Exception(
             "There was a problem synchronizing the source and target schemas. "
             "The target table has been saved to {} in the current directory "
@@ -325,7 +350,7 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
                     target_table = _sanitize_table(syn, target_table, target)
                     syn.store(sc.Table(target, target_table))
             except Exception as e:
-                dump_on_error(target_table, e)
+                dump_on_error(target_table, e, syn, source, target)
             if update:
                 if reference_col is not None:
                     source_table = source_table.set_index(reference_col, drop=False)
