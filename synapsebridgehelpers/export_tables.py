@@ -249,8 +249,9 @@ def synchronize_schemas(syn, schema_comparison, source, target,
     return target_schema
 
 
-def export_tables(syn, table_mapping, target_project=None, update=True,
-                  reference_col="recordId", copy_file_handles=True, **kwargs):
+def export_tables(syn, table_mapping, source_tables=None, target_project=None,
+                  update=True, reference_col="recordId",
+                  copy_file_handles=True, **kwargs):
     """Copy rows from one Synapse table to another. Or copy tables
     to a new table in a separate project.
 
@@ -263,6 +264,13 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
         from source to target tables. If exporting table records to not yet
         created tables in a seperate project, table_mapping can be a list or
         string.
+    source_tables : dict
+        A mapping from Synapse ID (str) values of source tables to pandas.DataFrame
+        where each DataFrame consists of rows to be copied from the source table.
+        This is a more explicit way to specify which rows will be copied from
+        source to target tables. To implicitly specify which rows will be copied,
+        pass named arguments to **kwargs that will be used in a call to
+        synapsebridgehelpers.query_across_tables.
     target_project : str, default None
         If exporting table records to not yet created tables in a seperate
         project, specify the target project's Synapse ID here.
@@ -289,13 +297,15 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
         if target_project is None:
             raise TypeError("If passing a list to table_mapping, "
                             "target_project must be set.")
-        source_tables = synapsebridgehelpers.query_across_tables(
-                syn, tables=table_mapping, as_data_frame=True, **kwargs)
-        if isinstance(table_mapping, str):
-            source_table_iter = [(table_mapping, source_tables[0])]
-        else:
-            source_table_iter = zip(table_mapping, source_tables)
-        for source_id, source_table in source_table_iter:
+        if source_tables is None:
+            new_records = synapsebridgehelpers.query_across_tables(
+                    syn, tables=table_mapping, as_data_frame=True, **kwargs)
+            if isinstance(table_mapping, str):
+                source_tables = {table_mapping: new_records[0]}
+            else:
+                source_tables = {
+                        t: df for t, df in zip(table_mapping, new_records)}
+        for source_id, source_table in source_tables.items():
             source_table_info = syn.get(source_id)
             source_table_cols = list(syn.getTableColumns(source_id))
             if copy_file_handles:
@@ -319,9 +329,10 @@ def export_tables(syn, table_mapping, target_project=None, update=True,
             results[source_id] = (target_table.tableId, source_table)
     elif isinstance(table_mapping, dict): # export to preexisting tables
         tables = list(table_mapping)
-        source_tables = synapsebridgehelpers.query_across_tables(
-                syn, tables, **kwargs)
-        source_tables = {t: df for t, df in zip(tables, source_tables)}
+        if source_tables is None:
+            new_records = synapsebridgehelpers.query_across_tables(
+                    syn, tables, **kwargs)
+            source_tables = {t: df for t, df in zip(tables, new_records)}
         for source, target in table_mapping.items():
             source_table = source_tables[source]
             target_table = syn.tableQuery("select * from {}".format(target))
