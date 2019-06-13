@@ -76,6 +76,52 @@ def _sanitize_dataframe(syn, records, target=None, cols=None):
     return records
 
 
+def _store_dataframe_to_table(syn, df, df_cols, table_id=None, parent_id=None,
+                              table_name=None, **kwargs):
+    """Store a pandas DataFrame to Synapse in a safe way by formatting the
+    the values so that the store operation is not rejected by Synapse.
+
+    Parameters
+    ----------
+    syn : synapseclient.Synapse
+    df : pandas.DataFrame
+    df_cols : list of synapseclient.Column objects
+    table_id : str, default None
+        Synapse ID of a preexisting Synapse Table to store `df` to.
+        Either `table_id` or both `parent_id` and `table_name` must
+        be supplied as arguments.
+    parent_id : str, default None
+        Synapse ID of the project to store `df` to as a table.
+        Either `table_id` or both `parent_id` and `table_name` must
+        be supplied as arguments.
+    table_name : str, default None
+        Either `table_id` or both `parent_id` and `table_name` must
+        be supplied as arguments.
+    **kwargs :
+        Keyword arguments to provide to syn.store (useful for provenance)
+    """
+    if table_id is None and parent_id is None and table_name is None:
+        raise TypeError("Either the table Synapse ID must be set or "
+                        "the parent ID and table name must be set.")
+    sanitized_dataframe = _sanitize_dataframe(
+            syn,
+            records = df,
+            cols = df_cols)
+    if table_id is None:
+        target_table_schema = sc.Schema(
+                name = table_name,
+                parent = parent_id,
+                columns = df_cols)
+        target_table = sc.Table(
+                schema = target_table_schema,
+                values = sanitized_dataframe)
+        target_table = syn.store(target_table, **kwargs)
+    else:
+        target_table = syn.store(sc.Table(table_id, sanitized_dataframe),
+                                 **kwargs)
+    return target_table
+
+
 def dump_on_error(df, e, syn, source_table, target_table):
     """Write `df` to the current directory, send an email to the current
     Synapse user, and raise an exception.
@@ -251,7 +297,7 @@ def synchronize_schemas(syn, schema_comparison, source, target,
 
 def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                   update=True, reference_col="recordId",
-                  copy_file_handles=True, **kwargs):
+                  copy_file_handles=None, **kwargs):
     """Copy rows from one Synapse table to another. Or copy tables
     to a new table in a separate project.
 
@@ -276,16 +322,23 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
         project, specify the target project's Synapse ID here.
     update : bool, default True
         When exporting records of one or more tables to other, preexisting
-        tables, whether to append new records to these tables or completely
-        overwrite the table records.
+        tables, whether to append new records to the target tables or completely
+        overwrite the table records. Note that rows in the target table that
+        match on the `reference_col` of rows in the source table will not be
+        updated to match the values in the source table even if `update` is True.
     reference_col : str or list
         If `update` is True, use this column(s) as the table index to determine
         which records are already present in the target table.
-    copy_file_handles : bool, default True
+    copy_file_handles : bool, default None
         Whether to copy the file handles from the source table to the target
-        table. If you are not the creator of these file handles, this must
-        be set to True if you want to a column containing file handles in your
-        target table.
+        table. By default, we will attempt to copy the source table records
+        without copying any file handles (copy_file_handles = None) and, if
+        an error is thrown, we will then copy the file handles before attempting
+        to store the table again. If the user explicitly sets
+        copy_file_handles = False, an exception will be raised if any of the file
+        handles in the source table are not owned by the user. Setting
+        copy_file_handles = True always creates copies of file handles, whether
+        the user owns them or not.
     **kwargs
         Additional named arguments to pass to synapsebridgehelpers.query_across_tables
 
@@ -314,18 +367,34 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                         df = source_table,
                         source_table_id = source_id,
                         source_table_cols = source_table_cols)
-            sanitized_source_table = _sanitize_dataframe(
-                    syn,
-                    records = source_table,
-                    cols = source_table_cols)
-            target_table_schema = sc.Schema(
-                    name = source_table_info["name"],
-                    parent = target_project,
-                    columns = source_table_cols)
-            target_table = sc.Table(
-                    schema = target_table_schema,
-                    values = sanitized_source_table)
-            target_table = syn.store(target_table)
+            try:
+                target_table = _store_dataframe_to_table(
+                        syn,
+                        df = source_table,
+                        df_cols = source_table_cols,
+                        parent_id = target_project,
+                        table_name = source_table_info["name"],
+                        used = source_id)
+            except sc.exceptions.SynapseHTTPError as e: # we don't own the file handles
+                if copy_file_handles: # actually we do, something else is wrong
+                    raise sc.exceptions.SynapseHTTPError(
+                        "There was an issue storing records from {} "
+                        "to {}.".format(source_id, target_project)) from e
+                elif copy_file_handles is False: # user explicitly specified no copies
+                    raise e
+                else:
+                    source_table = replace_file_handles(
+                            syn,
+                            df = source_table,
+                            source_table_id = source_id,
+                            source_table_cols = source_table_cols)
+                    target_table = _store_dataframe_to_table(
+                            syn,
+                            df = source_table,
+                            df_cols = source_table_cols,
+                            parent_id = target_project,
+                            table_name = source_table_info["name"],
+                            used = source_id)
             results[source_id] = (target_table.tableId, source_table)
     elif isinstance(table_mapping, dict): # export to preexisting tables
         tables = list(table_mapping)
@@ -374,20 +443,78 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                 new_records = source_table.loc[
                         source_table.index.difference(target_table.index)]
                 if len(new_records):
+                    source_table_info = syn.get(source)
+                    source_table_cols = list(syn.getTableColumns(source))
                     if (copy_file_handles):
                         new_records = replace_file_handles(
-                                syn, df = new_records, source_table_id = source)
-                    new_records = _sanitize_dataframe(
-                            syn, records = new_records, target = target)
-                    new_target_table = sc.Table(
-                            target, new_records.values.tolist())
-                    syn.store(new_target_table, used = source)
+                                syn,
+                                df = new_records,
+                                source_table_id = source,
+                                source_table_cols = source_table_cols)
+                    try:
+                        target_table = _store_dataframe_to_table(
+                                syn,
+                                df = new_records,
+                                df_cols = source_table_cols,
+                                table_id = target,
+                                used = source)
+                    except sc.exceptions.SynapseHTTPError as e: # we don't own the file handles
+                        if copy_file_handles: # actually we do, something else is wrong
+                            raise sc.exceptions.SynapseHTTPError(
+                                "There was an issue storing records from {} "
+                                "to {}.".format(source, target)) from e
+                        elif copy_file_handles is False: # user specified no copies
+                            raise e
+                        else:
+                            source_table = replace_file_handles(
+                                    syn,
+                                    df = new_records,
+                                    source_table_id = source,
+                                    source_table_cols = source_table_cols)
+                            target_table = _store_dataframe_to_table(
+                                    syn,
+                                    df = new_records,
+                                    df_cols = source_table_cols,
+                                    table_id = target,
+                                    used = source)
                     results[source] = (target, new_records)
-            else:
+            else: # delete existing rows, store upstream rows
                 target_table = syn.tableQuery("select * from {}".format(target))
                 syn.delete(target_table.asRowSet())
                 table_to_store = source_table.reset_index(drop=True)
-                syn.store(sc.Table(target, table_to_store))
+                source_cols = list(syn.getTableColumns(source))
+                if copy_file_handles:
+                    table_to_store = replace_file_handles(
+                            syn,
+                            df = table_to_store,
+                            source_table_id = source,
+                            source_table_cols = source_cols)
+                try:
+                    target_table = _store_dataframe_to_table(
+                            syn,
+                            df = table_to_store,
+                            df_cols = source_cols,
+                            table_id = target,
+                            used = source)
+                except sc.exceptions.SynapseHTTPError as e: # we don't own the file handles
+                    if copy_file_handles: # actually we do, something else is wrong
+                        raise sc.exceptions.SynapseHTTPError(
+                            "There was an issue storing records from {} "
+                            "to {}.".format(source, target)) from e
+                    elif copy_file_handles is False: # user specified no copies
+                        raise e
+                    else:
+                        table_to_store = replace_file_handles(
+                                syn,
+                                df = table_to_store,
+                                source_table_id = source,
+                                source_table_cols = source_cols)
+                        target_table = _store_dataframe_to_table(
+                                syn,
+                                df = table_to_store,
+                                df_cols = source_cols,
+                                table_id = target,
+                                used = source)
                 results[source] = (target, table_to_store)
     else:
         raise TypeError("table_mapping must be either a list (if exporting "

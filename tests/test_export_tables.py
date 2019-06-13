@@ -248,3 +248,81 @@ def test_manually_pass_source_tables_dict(syn, tables, new_project, sample_table
     print("returned results \n", updated_table_no_fh)
     print("correct result \n", correct_table_no_fh)
     pd.testing.assert_frame_equal(updated_table_no_fh, correct_table_no_fh)
+
+def test_export_file_handles_we_do_not_own_copy_false(syn, new_tables):
+    table_bad_file_handles = "syn19002937" # User ID #3357179 owns these file handles
+    with pytest.raises(sc.exceptions.SynapseHTTPError):
+        export_tables(
+                syn,
+                table_mapping = {table_bad_file_handles: new_tables["schema"][0]["id"]},
+                update = False,
+                copy_file_handles = False)
+
+def test_export_file_handles_we_do_not_own_copy_true(syn, new_tables, sample_table):
+    table_bad_file_handles = "syn19002937" # User ID #3357179 owns these file handles
+    target_table = new_tables["schema"][0]["id"]
+    exported_table = export_tables(
+            syn,
+            table_mapping = {table_bad_file_handles: target_table},
+            update = False,
+            copy_file_handles = True)
+    updated_table = syn.tableQuery(
+            "select * from {}".format(target_table)).asDataFrame()
+    updated_table_no_fh = updated_table.reset_index(drop=True).drop(
+            "raw_data", axis=1)
+    correct_table_no_fh = sample_table.drop("raw_data", axis=1)
+    pd.testing.assert_frame_equal(correct_table_no_fh, updated_table_no_fh)
+
+def test_export_file_handles_we_do_not_own_copy_none(syn, new_tables, sample_table):
+    table_bad_file_handles = "syn19002937" # User ID #3357179 owns these file handles
+    target_table = new_tables["schema"][0]["id"]
+    exported_table = export_tables(
+            syn,
+            table_mapping = {table_bad_file_handles: target_table},
+            update = False,
+            copy_file_handles = None)
+    updated_table = syn.tableQuery(
+            "select * from {}".format(target_table)).asDataFrame()
+    updated_table_no_fh = updated_table.reset_index(drop=True).drop(
+            "raw_data", axis=1)
+    correct_table_no_fh = sample_table.drop("raw_data", axis=1)
+    pd.testing.assert_frame_equal(correct_table_no_fh, updated_table_no_fh)
+
+def test_export_file_handles_we_do_not_own_copy_false_new_table(syn, new_project):
+    table_bad_file_handles = "syn19002937" # User ID #3357179 owns these file handles
+    with pytest.raises(sc.exceptions.SynapseHTTPError):
+        export_tables(
+                syn,
+                table_mapping = table_bad_file_handles,
+                target_project = new_project["id"],
+                copy_file_handles = False)
+
+def test_export_file_handles_we_do_not_own_copy_true_new_table(syn, new_project, sample_table):
+    table_bad_file_handles = "syn19002937" # User ID #3357179 owns these file handles
+    exported_table = export_tables(
+            syn,
+            table_mapping = table_bad_file_handles,
+            target_project = new_project["id"],
+            copy_file_handles = True)
+    new_table = syn.tableQuery(
+            "select * from {}".format(
+                exported_table[table_bad_file_handles][0])).asDataFrame()
+    new_table_no_fh = new_table.reset_index(drop=True).drop(
+            "raw_data", axis=1)
+    correct_table_no_fh = sample_table.drop("raw_data", axis=1)
+    pd.testing.assert_frame_equal(correct_table_no_fh, new_table_no_fh)
+
+def test_export_file_handles_we_do_not_own_copy_none_new_table(syn, new_project, sample_table):
+    table_bad_file_handles = "syn19002937" # User ID #3357179 owns these file handles
+    exported_table = export_tables(
+            syn,
+            table_mapping = table_bad_file_handles,
+            target_project = new_project["id"],
+            copy_file_handles = None)
+    new_table = syn.tableQuery(
+            "select * from {}".format(
+                exported_table[table_bad_file_handles][0])).asDataFrame()
+    new_table_no_fh = new_table.reset_index(drop=True).drop(
+            "raw_data", axis=1)
+    correct_table_no_fh = sample_table.drop("raw_data", axis=1)
+    pd.testing.assert_frame_equal(correct_table_no_fh, new_table_no_fh)
