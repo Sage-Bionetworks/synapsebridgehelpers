@@ -1,50 +1,42 @@
-import synapseclient
-import numpy as np
-import pandas as pd
-from synapseutils.copy import copyFileHandles
+import synapseutils as su
 
-def copyFileIdsInBatch(syn,table_id,fileIds):
-    """Outputs a dict(map) of the given fileId list to the output of copyFileHandles
-    Will drop nas in the input fileIds, returns an empty map if the column is
-    NOT of type FILEHANDLEID
-    
-    Remove/Edit this once copyFileHandles can process requests more than 100 at once
-    Change tableWithFileIds appropriately
+def copyFileIdsInBatch(syn, table_id, fileIds, content_type = "application/json"):
+    """Copy file handles from a pandas.Series object.
+
+    Parameters
+    ----------
+    syn : synapseclient.Synapse
+    table_id : str
+        Synapse ID of the table the original file handles belong to.
+    fileIds : pandas.Series
+        The column containing file handles
+    content_type : str
+
+    Returns
+    -------
+    A dict mapping original file handles to newly created file handles.
     """
-    #TODO remove once SYNPY-540 is fixed and released
-    
-    fileIds = fileIds.dropna().drop_duplicates().astype(int)
-    len_fIds = len(fileIds)
-    newIds = []
+    fhids_to_copy = fileIds.dropna().drop_duplicates().astype(int).tolist()
+    new_fhids = []
+    for i in range(0, len(fhids_to_copy), 100):
+        fhids_to_copy_i = fhids_to_copy[i:i+100]
+        new_fhids_i = su.copyFileHandles(
+                syn = syn,
+                fileHandles = fhids_to_copy_i,
+                associateObjectTypes = ["TableEntity"] * len(fhids_to_copy_i),
+                associateObjectIds = [table_id] * len(fhids_to_copy_i),
+                contentTypes = [content_type] * len(fhids_to_copy_i),
+                fileNames = [None] * len(fhids_to_copy_i))
+        for j in [int(i["newFileHandle"]["id"]) for i in new_fhids_i["copyResults"]]:
+            new_fhids.append(j)
+    fhid_map = {k: v for k, v in zip(fhids_to_copy, new_fhids)}
+    return fhid_map
 
-    # The check for 100 is because copyFileHandles cannot handle more than 100 requests at a time
-    # The check for 0 is for empty colunms
-    
-    if len_fIds <= 100 and len_fIds>0:
-        tempIds = copyFileHandles(syn, fileIds, ['TableEntity']*len_fIds,[table_id]*len_fIds, [None]*len_fIds, [None]*len_fIds)
-        tempIds = [x['newFileHandle']['id'] for x in tempIds['copyResults']]
-        newIds = newIds + tempIds
-    else:
-        start_pos = 0
-        while start_pos < len_fIds:
-            curr_len = min(100, len_fIds-start_pos)
-            tempIds = copyFileHandles(syn, fileIds[start_pos:min(len_fIds, start_pos+100)], 
-                                  ['TableEntity']*curr_len,[table_id]*curr_len, 
-                                  [None]*curr_len,[None]*curr_len)
-            tempIds = [x['newFileHandle']['id'] for x in tempIds['copyResults']]
-            newIds = newIds + tempIds
-            start_pos = start_pos+100
-
-    # Map the fileIds to corresponding newIds
-    newIds = [int(new_id) for new_id in newIds]
-    idMap = dict(zip(fileIds,newIds))
-    return idMap
-    
 
 def tableWithFileIds(syn,table_id, healthcodes=None):
     """ Returns a dict like {'df': dataFrame, 'cols': names of columns of type FILEHANDLEID} with actual fileHandleIds,
     also has an option to filter table given a list of healthcodes """
-    
+
     # Getting cols from current table id
     cols = syn.getTableColumns(table_id) # Generator object
 
@@ -61,9 +53,9 @@ def tableWithFileIds(syn,table_id, healthcodes=None):
     # Store the results as a dataframe
     df = results.asDataFrame()
 
-    # Iterate for each element(column) that has columntype FILEHANDLEID 
+    # Iterate for each element(column) that has columntype FILEHANDLEID
     for element in cols_filehandleids:
         df[element] = df[element].map(copyFileIdsInBatch(syn,table_id,df[element]))
         df[element] = [int(x) if x==x else '' for x in df[element]]
-        
+
     return {'df' : df, 'cols' : cols_filehandleids}
