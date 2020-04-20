@@ -375,9 +375,9 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                         parent_id = target_project,
                         table_name = source_table_info["name"],
                         used = source_id)
-            except sc.exceptions.SynapseHTTPError as e: # we don't own the file handles
+            except sc.core.exceptions.SynapseHTTPError as e: # we don't own the file handles
                 if copy_file_handles: # actually we do, something else is wrong
-                    raise sc.exceptions.SynapseHTTPError(
+                    raise sc.core.exceptions.SynapseHTTPError(
                         "There was an issue storing records from {} "
                         "to {}.".format(source_id, target_project)) from e
                 elif copy_file_handles is False: # user explicitly specified no copies
@@ -458,9 +458,9 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                                 df_cols = source_table_cols,
                                 table_id = target,
                                 used = source)
-                    except sc.exceptions.SynapseHTTPError as e: # we don't own the file handles
+                    except sc.core.exceptions.SynapseHTTPError as e: # we don't own the file handles
                         if copy_file_handles: # actually we do, something else is wrong
-                            raise sc.exceptions.SynapseHTTPError(
+                            raise sc.core.exceptions.SynapseHTTPError(
                                 "There was an issue storing records from {} "
                                 "to {}.".format(source, target)) from e
                         elif copy_file_handles is False: # user specified no copies
@@ -496,9 +496,9 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                             df_cols = source_cols,
                             table_id = target,
                             used = source)
-                except sc.exceptions.SynapseHTTPError as e: # we don't own the file handles
+                except sc.core.exceptions.SynapseHTTPError as e: # we don't own the file handles
                     if copy_file_handles: # actually we do, something else is wrong
-                        raise sc.exceptions.SynapseHTTPError(
+                        raise sc.core.exceptions.SynapseHTTPError(
                             "There was an issue storing records from {} "
                             "to {}.".format(source, target)) from e
                     elif copy_file_handles is False: # user specified no copies

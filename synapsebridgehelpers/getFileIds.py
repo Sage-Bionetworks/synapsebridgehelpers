@@ -25,9 +25,9 @@ def copyFileIdsInBatch(syn, table_id, fileIds, content_type = "application/json"
                 fileHandles = fhids_to_copy_i,
                 associateObjectTypes = ["TableEntity"] * len(fhids_to_copy_i),
                 associateObjectIds = [table_id] * len(fhids_to_copy_i),
-                contentTypes = [content_type] * len(fhids_to_copy_i),
-                fileNames = [None] * len(fhids_to_copy_i))
-        for j in [int(i["newFileHandle"]["id"]) for i in new_fhids_i["copyResults"]]:
+                newContentTypes = [content_type] * len(fhids_to_copy_i),
+                newFileNames = [None] * len(fhids_to_copy_i))
+        for j in [int(i['newFileHandle']['id']) for i in new_fhids_i]:
             new_fhids.append(j)
     fhid_map = {k: v for k, v in zip(fhids_to_copy, new_fhids)}
     return fhid_map
