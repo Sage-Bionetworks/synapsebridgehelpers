@@ -251,7 +251,7 @@ def test_manually_pass_source_tables_dict(syn, tables, new_project, sample_table
 
 def test_export_file_handles_we_do_not_own_copy_false(syn, new_tables):
     table_bad_file_handles = "syn19002937" # User ID #3357179 owns these file handles
-    with pytest.raises(sc.exceptions.SynapseHTTPError):
+    with pytest.raises(sc.core.exceptions.SynapseHTTPError):
         export_tables(
                 syn,
                 table_mapping = {table_bad_file_handles: new_tables["schema"][0]["id"]},
@@ -290,7 +290,7 @@ def test_export_file_handles_we_do_not_own_copy_none(syn, new_tables, sample_tab
 
 def test_export_file_handles_we_do_not_own_copy_false_new_table(syn, new_project):
     table_bad_file_handles = "syn19002937" # User ID #3357179 owns these file handles
-    with pytest.raises(sc.exceptions.SynapseHTTPError):
+    with pytest.raises(sc.core.exceptions.SynapseHTTPError):
         export_tables(
                 syn,
                 table_mapping = table_bad_file_handles,
