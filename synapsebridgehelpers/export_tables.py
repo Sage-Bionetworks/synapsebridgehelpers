@@ -415,7 +415,7 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                     source_table = source_table,
                     target_table = target_table)
             try: # error after updating schema -> data may be lost on Synapse
-                if len(schema_comparison.values()):
+                if sum(list(map(len, schema_comparison.values()))) > 0:
                     synchronize_schemas(
                             syn,
                             schema_comparison = schema_comparison,
