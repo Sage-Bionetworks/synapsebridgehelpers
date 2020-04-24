@@ -115,10 +115,11 @@ def _store_dataframe_to_table(syn, df, df_cols, table_id=None, parent_id=None,
         target_table = sc.Table(
                 schema = target_table_schema,
                 values = sanitized_dataframe)
-        target_table = syn.store(target_table, **kwargs)
+        target_table = syn.store(target_table, headers = df_cols, **kwargs)
     else:
-        target_table = syn.store(sc.Table(table_id, sanitized_dataframe),
-                                 **kwargs)
+        target_table = syn.store(
+                sc.Table(table_id, sanitized_dataframe, headers = df_cols),
+                **kwargs)
     return target_table
 
 
@@ -429,7 +430,7 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                     target_table = target_table.rename(
                             schema_comparison["renamed"], axis = 1)
                     target_table = _sanitize_dataframe(syn, target_table, target)
-                    syn.store(sc.Table(target, target_table))
+                    syn.store(sc.Table(target, target_table, headers = source_cols))
             except Exception as e:
                 dump_on_error(target_table, e, syn, source, target)
             if update:
