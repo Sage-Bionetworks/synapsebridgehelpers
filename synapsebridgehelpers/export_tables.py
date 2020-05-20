@@ -405,6 +405,8 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
             source_tables = {t: df for t, df in zip(tables, new_records)}
         for source, target in table_mapping.items():
             source_table = source_tables[source]
+            if source_table.shape[0] == 0:
+                continue
             target_table = syn.tableQuery("select * from {}".format(target))
             target_table = target_table.asDataFrame()
             # has the schema changed?
