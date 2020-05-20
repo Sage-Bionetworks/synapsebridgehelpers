@@ -33,11 +33,11 @@ def replace_file_handles(syn, df, source_table_id, source_table_cols=None,
                     content_type = content_type)
             fhid_map = {str(k): str(v) for k, v in fhid_map.items()}
             df[c["name"]] = df[c["name"]].apply(
-                    parse_float_to_int).map(fhid_map)
+                    parse_number_to_string).map(fhid_map)
     return df
 
 
-def parse_float_to_int(i):
+def parse_number_to_string(i):
     str_i = str(i)
     if str_i == "nan":
         str_i = None
@@ -65,14 +65,15 @@ def _sanitize_dataframe(syn, records, target=None, cols=None):
     A pandas DataFrame with values and their dtypes modified in a way that
     allows them to be stored to Synapse as a Table.
     """
+    records = records.reset_index(drop=True)
     if cols is None and target is None:
         raise TypeError("Either target or cols must be set.")
     if cols is None:
         cols = syn.getTableColumns(target)
     for c in cols:
-        if (c["columnType"] in ["INTEGER", "DATE", "FILEHANDLEID", "USER"] and
-            isinstance(records[c["name"]].iloc[0], np.float64)):
-            records[c["name"]] = list(map(parse_float_to_int, records[c["name"]]))
+        if (c["columnType"] in ["INTEGER", "DATE", "FILEHANDLEID", "USER", "STRING"] and
+            isinstance(records[c["name"]].iloc[0], np.number)):
+            records[c["name"]] = list(map(parse_number_to_string, records[c["name"]]))
     return records
 
 
@@ -114,12 +115,11 @@ def _store_dataframe_to_table(syn, df, df_cols, table_id=None, parent_id=None,
                 columns = df_cols)
         target_table = sc.Table(
                 schema = target_table_schema,
-                values = sanitized_dataframe)
-        target_table = syn.store(target_table, headers = df_cols, **kwargs)
+                values = sanitized_dataframe,
+                headers = df_cols)
     else:
-        target_table = syn.store(
-                sc.Table(table_id, sanitized_dataframe, headers = df_cols),
-                **kwargs)
+        target_table = sc.Table(table_id, sanitized_dataframe, headers=df_cols)
+    target_table = syn.store(target_table, **kwargs)
     return target_table
 
 
@@ -405,6 +405,8 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
             source_tables = {t: df for t, df in zip(tables, new_records)}
         for source, target in table_mapping.items():
             source_table = source_tables[source]
+            if source_table.shape[0] == 0:
+                continue
             target_table = syn.tableQuery("select * from {}".format(target))
             target_table = target_table.asDataFrame()
             # has the schema changed?
@@ -415,7 +417,7 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                     target_cols = target_cols,
                     source_table = source_table,
                     target_table = target_table)
-            try: # error after updating schema -> data may be lost on Synapse
+            try: # error after updating schema -> data may be lost from target table
                 if sum(list(map(len, schema_comparison.values()))) > 0:
                     synchronize_schemas(
                             syn,
@@ -430,6 +432,7 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                     target_table = target_table.rename(
                             schema_comparison["renamed"], axis = 1)
                     target_table = _sanitize_dataframe(syn, target_table, target)
+                    target_table = target_table.reset_index(drop=True)
                     syn.store(sc.Table(target, target_table, headers = source_cols))
             except Exception as e:
                 dump_on_error(target_table, e, syn, source, target)
@@ -482,12 +485,12 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
             else: # delete existing rows, store upstream rows
                 target_table = syn.tableQuery("select * from {}".format(target))
                 syn.delete(target_table.asRowSet())
-                table_to_store = source_table.reset_index(drop=True)
                 source_cols = list(syn.getTableColumns(source))
+                table_to_store = source_table
                 if copy_file_handles:
                     table_to_store = replace_file_handles(
                             syn,
-                            df = table_to_store,
+                            df = source_table,
                             source_table_id = source,
                             source_table_cols = source_cols)
                 try:
