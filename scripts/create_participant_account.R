@@ -29,6 +29,10 @@ read_args <- function() {
       make_option("--phone",
           help=glue("The field in the input table containing phone numbers. ",
                     "Either this parameter or --email must be provided.")),
+      make_option("--regionCode",
+          help=glue("CLDR two-letter region code describing the region in ",
+                    "which the phone number was issued."),
+          default="US"),
       make_option("--email",
           help=glue("The field in the input table containing email addresses. ",
                     "Either this parameter or --phone must be provided.")),
@@ -141,6 +145,9 @@ validate_and_format_phone <- function(phone_number) {
 #' @param email The email address of this participant.
 #' @param support_email An email address to include in the status message
 #' stored back to the output_table in case account creation fails.
+#' @param data_groups A list of data groups to enroll this participant in.
+#' @param region_code CLDR two-letter region code describing the region in
+#' which the phone number was issued. Defaults to "US".
 create_participant_account <- function(
     output_table,
     study=NULL,
@@ -148,7 +155,8 @@ create_participant_account <- function(
     phone=NULL,
     email=NULL,
     support_email=NULL,
-    data_groups=NULL) {
+    data_groups=NULL,
+    region_code="US") {
   if (is.null(phone) && is.null(email)) {
     stop("Either phone or email must be provided to create an account.")
   }
@@ -165,7 +173,8 @@ create_participant_account <- function(
       email = email,
       study = study,
       external_id = participant_identifier,
-      data_groups = data_groups)
+      data_groups = data_groups,
+      phone_region_code = region_code)
     status <- list(success = TRUE,
                    content = "Account creation successful.",
                    log = NA_character_)
@@ -252,7 +261,8 @@ main <- function() {
         phone = phone,
         email = email,
         support_email = args[["supportEmail"]],
-        data_groups = data_groups)
+        data_groups = data_groups,
+        region_code = args[["regionCode"]])
     store_result(
       output_table = args[["outputTable"]],
       participant_identifier_field = args[["participantIdentifier"]],
