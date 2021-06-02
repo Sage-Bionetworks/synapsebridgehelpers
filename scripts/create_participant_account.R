@@ -1,6 +1,7 @@
 library(bridgeclient)
 library(synapser)
 library(optparse)
+library(dplyr)
 library(glue)
 
 read_args <- function() {
@@ -29,6 +30,8 @@ read_args <- function() {
       make_option("--email",
           help=glue("The field in the input table containing email addresses. ",
                     "Either this parameter or --phone must be provided.")),
+      make_option("--dataGroups",
+          help="A comma-delimited string of data groups to assign."),
       make_option("--statusField",
           help="The field name in the output table to write the status message to.",
           default="status"),
@@ -46,7 +49,8 @@ read_args <- function() {
 
 validate_args <- function(args) {
   required_arguments <- c("inputTable", "outputTable", "app", "bridgeEmail",
-                          "bridgePassword", "synapseEmail", "synapsePassword")
+                          "bridgePassword", "synapseEmail", "synapsePassword",
+                          "participantIdentifier", "statusField", "logField")
   lapply(required_arguments, function(arg) {
     if (!hasName(args, arg)) {
       stop(glue("--{arg} is required."))
@@ -77,30 +81,28 @@ validate_args <- function(args) {
 get_new_participants <- function(
     input_table,
     output_table,
-    phone=NULL,
-    email=NULL,
-    participant_identifier=NULL) {
-  if (is.null(phone) && is.null(email) && is.null(participant_identifier)) {
-    stop(glue("At least one identifying field must be provided to ",
-              "deal with duplicates."))
-  }
-  identifying_field <- case_when(
-      !is.null(phone) ~ phone,
-      !is.null(email) ~ email,
-      !is.null(participant_identifier) ~ participant_identifier)
+    participant_identifier) {
   input_q <- synTableQuery(glue("SELECT * FROM {input_table}"))
   input_df <- dplyr::as_tibble(input_q$asDataFrame())
   output_q <- synTableQuery(glue("SELECT * FROM {output_table}"))
   output_df <- dplyr::as_tibble(output_q$asDataFrame())
-  diff_df <- dplyr::anti_join(input_df, output_df) %>%
+  diff_df <- input_df %>%
+    dplyr::anti_join(output_df, by = {{ participant_identifier }}) %>%
     arrange(desc(ROW_ID)) %>%
-    distinct(identifying_field, .keep_all=TRUE) # only consider most recent
+    distinct(.data[[participant_identifier]],
+             .keep_all=TRUE) # only consider most recent
   return(diff_df)
 }
 
 #' @return List with names `valid` and `number`
 validate_and_format_phone <- function(phone_number) {
-
+  phone_digits <- stringr::str_replace_all(phone_number, "\\D", "")
+  if (nchar(phone_digits) < 7) {
+    result <- list(valid=FALSE, number=phone_digits)
+  } else {
+    result <- list(valid=TRUE, number=phone_digits)
+  }
+  return(result)
 }
 
 #' Create a single account on Bridge for this record
@@ -119,13 +121,13 @@ create_participant_account <- function(
     participant_identifier=NULL,
     phone=NULL,
     email=NULL,
-    support_email=NULL) {
+    support_email=NULL,
+    data_groups=NULL) {
   if (is.null(phone) && is.null(email)) {
     stop("Either phone or email must be provided to create an account.")
   }
   phone <- validate_and_format_phone(phone)
-  # TODO: Will we actually process the record again if it is re-inputted?
-  if (!phone$valid) {
+  if (!phone[["valid"]]) {
     status <- list(success = FALSE,
                    content = glue("Account creation failed. ",
                                   "Check phone number formatting."))
@@ -133,12 +135,14 @@ create_participant_account <- function(
   }
   status <- tryCatch({
     content <- bridgeclient::create_participant(
-      phone_number = phone$number,
+      phone_number = phone[["number"]],
       email = email,
       study = study,
-      external_id = participant_identifier)
+      external_id = participant_identifier,
+      data_groups = data_groups)
     status <- list(success = TRUE,
-                   content = "Account creation successful")
+                   content = "Account creation successful.",
+                   log = NA_character_)
     return(status)
   }, error = function(e) {
     status <- list(success = FALSE,
@@ -182,11 +186,17 @@ main <- function() {
   #synLogin()
   args <- read_args()
   validate_args(args)
+  if (has_name(args, "dataGroups")) {
+    data_groups <- stringr::str_split(data_groups, ",")[[1]]
+  } else {
+    data_groups <- NULL
+  }
   synLogin(email = args$synapseEmail, password = args$synapsePassword)
   bridge_login(args$app, args$bridgeEmail, args$bridgePassword)
   new_participants <- get_new_participants(
     input_table = args[["inputTable"]],
-    output_table = args[["outputTable"]])
+    output_table = args[["outputTable"]],
+    participant_identifier = args[["participantIdentifier"]])
   purrr::pmap(new_participants, function(...) {
     record <- list(...)
     if (hasName(args, "phone")) {
@@ -209,26 +219,17 @@ main <- function() {
         study = args[["study"]],
         participant_identifier = participant_identifier,
         phone = phone,
-        email = email)
-    if (status$success) {
-      store_result(
-        output_table = args[["outputTable"]],
-        participant_identifier_field = args[["participantIdentifier"]],
-        participant_identifier = participant_identifier,
-        status_field = args[["statusField"]],
-        status_message = status$message,
-        log_field = args[["logField"]],
-        log_message = "")
-    } else {
-      store_result(
-        output_table = args[["outputTable"]],
-        participant_identifier_field = args[["participantIdentifier"]],
-        participant_identifier = participant_identifier,
-        status_field = args[["statusField"]],
-        status_message = status$message,
-        log_field = args[["logField"]],
-        log_message = status$log)
-    }
+        email = email,
+        support_email = args[["supportEmail"]],
+        data_groups = data_groups)
+    store_result(
+      output_table = args[["outputTable"]],
+      participant_identifier_field = args[["participantIdentifier"]],
+      participant_identifier = participant_identifier,
+      status_field = args[["statusField"]],
+      status_message = status[["content"]],
+      log_field = args[["logField"]],
+      log_message = status[["log"]])
   })
 }
 
