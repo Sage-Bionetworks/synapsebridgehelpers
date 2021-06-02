@@ -183,11 +183,10 @@ store_result <- function(
 }
 
 main <- function() {
-  #synLogin()
   args <- read_args()
   validate_args(args)
-  if (has_name(args, "dataGroups")) {
-    data_groups <- stringr::str_split(data_groups, ",")[[1]]
+  if (hasName(args, "dataGroups")) {
+    data_groups <- stringr::str_split(args[["dataGroups"]], ",")[[1]]
   } else {
     data_groups <- NULL
   }
