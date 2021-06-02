@@ -7,21 +7,23 @@ library(glue)
 read_args <- function() {
   option_list <- list(
       make_option("--inputTable",
-          help="Synapse table where participant information is initially stored."),
+          help=glue("Required. Synapse table where participant information ",
+                    "is initially stored.")),
       make_option("--outputTable",
-          help="Synapse table where result of this script will be stored."),
+          help=glue("Required. Synapse table where result of this script ",
+                    "will be stored.")),
       make_option("--app",
-          help="The identifier of the app to enroll users in."),
+          help="Required. The identifier of the app to enroll users in."),
       make_option("--bridgeEmail",
-          help="The email address associated with your Bridge account."),
-      make_option("--bridgePassword", help="Your Bridge password."),
+          help="Required. The email address associated with your Bridge account."),
+      make_option("--bridgePassword", help="Required. Your Bridge password."),
       make_option("--synapseEmail",
-          help="The email address associated with your Synapse account."),
-      make_option("--synapsePassword", help="Your Synapse password."),
+          help="Required. The email address associated with your Synapse account."),
+      make_option("--synapsePassword", help="Required. Your Synapse password."),
       make_option("--study",
           help="The identifier of the study to enroll users in."),
       make_option("--participantIdentifier",
-          help=glue("The field in the input and output tables containing ",
+          help=glue("Required. The field in the input and output tables containing ",
                     "the participant identifier. This could be the same field ",
                     "as --phone or --email.")),
       make_option("--phone",
@@ -33,15 +35,39 @@ read_args <- function() {
       make_option("--dataGroups",
           help="A comma-delimited string of data groups to assign."),
       make_option("--statusField",
-          help="The field name in the output table to write the status message to.",
+          help=glue("Required. Defaults to `status`. The field name in the ",
+                    "output table to write the status message to."),
           default="status"),
       make_option("--logField",
-          help="The field name in the output table to log errors to.",
+          help=glue("Required. Defaults to `logs`. The field name in the ",
+                    "output table to log errors to."),
           default="logs"),
       make_option("--supportEmail",
           help=glue("The email address to include in the status messages when ",
                     "something goes wrong.")))
-  parser <- OptionParser(option_list=option_list)
+  parser <- OptionParser(
+      option_list=option_list,
+      prog="Rscript",
+      description=glue("This script serves as a backend service for registering ",
+                       "new study participants with Bridge. Its original ",
+                       "intended use was to allow external study coordinators ",
+                       "to enter participant data into Synapse tables via ",
+                       "Synapse wiki forms. The data is added as a row to an ",
+                       "input table. The input table is checked against an ",
+                       "output table of already processed participants. ",
+                       "Participants found in the input table but not in the ",
+                       "output table will have a Bridge account created ",
+                       "using the provided information. The status (success ",
+                       "or failure) of the account creation and any ",
+                       "relevant logs will be stored to the output table. ",
+                       "Input and output tables are compared using a common ",
+                       "field, specified by the --participantIdentifier flag. ",
+                       "The input table must have a field for the participant ",
+                       "identifier as well as a field(s) for either ",
+                       "phone numbers, email addresses, or both. The output ",
+                       "table must have the participant identifier field ",
+                       "as well as fields for status messages and logs. ",
+                       "See the full list of available options below."))
   args <- parse_args(parser)
   return(args)
 }
@@ -145,10 +171,16 @@ create_participant_account <- function(
                    log = NA_character_)
     return(status)
   }, error = function(e) {
-    status <- list(success = FALSE,
-                   content = glue("Account creation failed. Please contact ",
-                                  "{support_email}"),
-                   log = e$message)
+    if (!is.null(support_email)) {
+      status <- list(success = FALSE,
+                     content = glue("Account creation failed. Please contact ",
+                                    "{support_email}"),
+                     log = e$message)
+    } else {
+      status <- list(success = FALSE,
+                     content = "Account creation failed.",
+                     log = e$message)
+    }
     return(status)
   })
   return(status)
