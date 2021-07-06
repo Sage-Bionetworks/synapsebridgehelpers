@@ -71,9 +71,10 @@ def _sanitize_dataframe(syn, records, target=None, cols=None):
     if cols is None:
         cols = syn.getTableColumns(target)
     for c in cols:
-        if (c["columnType"] in ["INTEGER", "DATE", "FILEHANDLEID", "USER", "STRING"] and
+        if (c["columnType"] in ["INTEGER", "DATE", "FILEHANDLEID", "USER"] and
+            len(records[c["name"]]) and
             isinstance(records[c["name"]].iloc[0], np.number)):
-            records[c["name"]] = list(map(parse_number_to_string, records[c["name"]]))
+            records[c["name"]] = list(map(parse_float_to_int, records[c["name"]]))
     return records
 
 
