@@ -43,11 +43,11 @@ def find_tables_with_data(syn, tables, healthCodes):
 def safe_query(query_str, syn, continueOnMissingColumn):
     try:
         return syn.tableQuery(query_str)
-    except sc.exceptions.SynapseHTTPError as e:
+    except sc.core.exceptions.SynapseHTTPError as e:
         if e.response.status_code == 400 and continueOnMissingColumn:
             return
         else:
-            raise sc.exceptions.SynapseHTTPError(
+            raise sc.core.exceptions.SynapseHTTPError(
                     "Invalid query:\n\n{}".format(query_str)) from e
 
 def query_across_tables(syn, tables, query=None,
