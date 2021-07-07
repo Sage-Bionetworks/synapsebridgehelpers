@@ -232,11 +232,13 @@ main <- function() {
     data_groups <- NULL
   }
   synLogin(email = args$synapseEmail, password = args$synapsePassword)
-  bridge_login(args$app, args$bridgeEmail, args$bridgePassword)
   new_participants <- get_new_participants(
     input_table = args[["inputTable"]],
     output_table = args[["outputTable"]],
     participant_identifier = args[["participantIdentifier"]])
+  if (nrow(new_participants)) {
+    bridge_login(args$app, args$bridgeEmail, args$bridgePassword)
+  }
   purrr::pmap(new_participants, function(...) {
     record <- list(...)
     if (hasName(args, "phone")) {
