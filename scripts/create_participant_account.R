@@ -164,6 +164,9 @@ create_participant_account <- function(
                                   "Check phone number formatting."))
     return(status)
   }
+  if (is.null(support_email)) {
+    support_email <- "the study administrator."
+  }
   status <- tryCatch({
     content <- bridgeclient::create_participant(
       phone_number = phone[["number"]],
@@ -175,7 +178,6 @@ create_participant_account <- function(
     status <- list(success = TRUE,
                    content = "Account creation successful.",
                    log = NA_character_)
-    return(status)
   }, error = function(e) {
     if (!is.null(support_email)) {
       status <- list(success = FALSE,
@@ -213,6 +215,9 @@ update_participant_account <- function(
     participant_identifier=NULL,
     support_email=NULL,
     data_groups=NULL) {
+  if (is.null(support_email)) {
+    support_email <- "the study administrator."
+  }
   # enroll in new study
   if ((!is.null(study) && is.null(participant_identifier)) ||
       (is.null(study) && !is.null(participant_identifier))) {
@@ -242,8 +247,8 @@ update_participant_account <- function(
     } else {
       # Not yet enrolled in this study
       status <- tryCatch({
-        bridgeclient:::restPOST(
-            "v5/studies/{study}/enrollments",
+        bridgeclient:::bridgePOST(
+            glue("v5/studies/{study}/enrollments"),
             body = list(
                 userId=participant$id,
                 externalId=participant_identifier))
@@ -258,19 +263,19 @@ update_participant_account <- function(
             content = glue("Account update failed. Please contact ",
                            "{support_email}"),
             log = e$message)
+        return(status)
       })
-      return(status)
     }
   } else if (!is.null(data_groups)) {
-    is_match <- all(purrr::map(data_groups, ~ . %in% participant$dataGroups))
-    if (is_match) {
+    already_has_data_groups <- setequal(data_groups, participant$dataGroups)
+    if (already_has_data_groups) {
       status <- list(
           success = TRUE,
           content = "Account update successful.",
           log = glue("This user is already assigned to those data groups."))
     } else {
       status <- tryCatch({
-        bridgeclient:::restPOST(
+        bridgeclient:::bridgePOST(
           glue("v3/participants/{participant$id}"),
           body = list(dataGroups = data_groups))
         status <- list(
@@ -283,6 +288,7 @@ update_participant_account <- function(
             content = glue("Account update failed. Please contact ",
                            "{support_email}"),
             log = e$message)
+        return(status)
       })
     }
     return(status)
@@ -350,19 +356,10 @@ main <- function() {
     } else {
       participant_identifier <- NULL
     }
-    tryCatch({
-      # TODO replace with search participant
-      participant <- bridgeclient::get_participant(
-          phone=phone,
-          email=email,
-          external_id = participant_identifier)
-      status <- update_participant_account(
-          participant = participant,
-          study = study,
-          participant_identifier = participant_identifier,
-          support_email = args[["supportEmail"]],
-          data_groups = data_groups)
-    }, error = function(e) { # create new account
+    participant_search <- bridgeclient::search_participants(
+        phone = phone,
+        email = email)
+    if (participant_search$total == 0) {
       status <- create_participant_account(
           study = args[["study"]],
           participant_identifier = participant_identifier,
@@ -371,17 +368,33 @@ main <- function() {
           support_email = args[["supportEmail"]],
           data_groups = data_groups,
           region_code = args[["regionCode"]])
-      store_result(
-        output_table = args[["outputTable"]],
-        participant_identifier_field = args[["participantIdentifier"]],
-        participant_identifier = participant_identifier,
-        status_field = args[["statusField"]],
-        status_message = status[["content"]],
-        log_field = args[["logField"]],
-        log_message = status[["log"]])
-    })
+    } else if (participant_search$total == 1) {
+      participant <- bridgeclient::get_participant(
+        user_id = participant_search$items[[1]]$id)
+      status <- update_participant_account(
+          participant = participant,
+          study = study,
+          participant_identifier = participant_identifier,
+          support_email = args[["supportEmail"]],
+          data_groups = data_groups)
+    } else {
+      status <- list(
+          success = FALSE,
+          content = glue("Account update failed. Please contact ",
+                         "{support_email}"),
+          log = glue("There is more than one account which matches ",
+                     "that phone or email."))
+    }
+    store_result(
+      output_table = args[["outputTable"]],
+      participant_identifier_field = args[["participantIdentifier"]],
+      participant_identifier = participant_identifier,
+      status_field = args[["statusField"]],
+      status_message = status[["content"]],
+      log_field = args[["logField"]],
+      log_message = status[["log"]])
   })
 }
 
-#main()
+main()
 
