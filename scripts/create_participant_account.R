@@ -137,8 +137,6 @@ validate_and_format_phone <- function(phone_number) {
 
 #' Create a single account on Bridge for this record
 #'
-#' @param output_table The Synapse ID of the table to output the resulting
-#' status to.
 #' @param study The identifier of the study to enroll this user in.
 #' @param participant_identifier The participant identifier.
 #' @param phone The phone number of this participant.
@@ -149,7 +147,6 @@ validate_and_format_phone <- function(phone_number) {
 #' @param region_code CLDR two-letter region code describing the region in
 #' which the phone number was issued. Defaults to "US".
 create_participant_account <- function(
-    output_table,
     study=NULL,
     participant_identifier=NULL,
     phone=NULL,
@@ -193,6 +190,103 @@ create_participant_account <- function(
     return(status)
   })
   return(status)
+}
+
+#' Update a preexisting account with the supplied arguments
+#'
+#' Only one update at a time is currently supported (e.g., a
+#' study/external_id update, XOR a data groups update).
+#' This is so that the returned status can be as informative
+#' as possible.
+#'
+#' @param participant The participant account as returned by
+#' \link[bridgeclient]{get_participant}.
+#' @param study The identifier of the study to enroll this user in.
+#' @param participant_identifier The participant identifier.
+#' @param support_email An email address to include in the status message
+#' stored back to the output_table in case account creation fails.
+#' @param data_groups A list of data groups to enroll this participant in.
+#' @return a list with fields success, content, and log
+update_participant_account <- function(
+    participant,
+    study=NULL,
+    participant_identifier=NULL,
+    support_email=NULL,
+    data_groups=NULL) {
+  # enroll in new study
+  if ((!is.null(study) && is.null(participant_identifier)) ||
+      (is.null(study) && !is.null(participant_identifier))) {
+    stop(glue("If one of `study` or `participant_identifier` is set, ",
+              "both parameters must be set."))
+  }
+  if (!is.null(study) && !is.null(participant_identifier)) {
+    if (study %in% participant$studyIds) {
+      # Already enrolled in this study
+      existing_external_id <- participant$externalIds[[study]]
+      if (participant_identifier != existing_external_id) {
+        status <- list(
+            success = FALSE,
+            content = glue("Account update failed. Please contact ",
+                           "{support_email}"),
+            log = glue("This user is already enrolled in this ",
+                       "study with external ID: {existing_external_id}"))
+        return(status)
+      } else { # Already enrolled with this external ID
+        status <- list(
+            success = TRUE,
+            content = "Account update successful.",
+            log = glue("This user is already enrolled in this ",
+                       "study with that external ID."))
+        return(status)
+      }
+    } else {
+      # Not yet enrolled in this study
+      status <- tryCatch({
+        bridgeclient:::restPOST(
+            "v5/studies/{study}/enrollments",
+            body = list(
+                userId=participant$id,
+                externalId=participant_identifier))
+        status <- list(
+            success = TRUE,
+            content = "Account update successful.",
+            log = glue("This user had a preexisting account and ",
+                       "has been enrolled in this study"))
+      }, error = function(e) {
+        status <- list(
+            success = FALSE,
+            content = glue("Account update failed. Please contact ",
+                           "{support_email}"),
+            log = e$message)
+      })
+      return(status)
+    }
+  } else if (!is.null(data_groups)) {
+    is_match <- all(purrr::map(data_groups, ~ . %in% participant$dataGroups))
+    if (is_match) {
+      status <- list(
+          success = TRUE,
+          content = "Account update successful.",
+          log = glue("This user is already assigned to those data groups."))
+    } else {
+      status <- tryCatch({
+        bridgeclient:::restPOST(
+          glue("v3/participants/{participant$id}"),
+          body = list(dataGroups = data_groups))
+        status <- list(
+            success = TRUE,
+            content = "Account update successful.",
+            log = NA_character_)
+      }, error = function(e) {
+        status <- list(
+            success = FALSE,
+            content = glue("Account update failed. Please contact ",
+                           "{support_email}"),
+            log = e$message)
+      })
+    }
+    return(status)
+  }
 }
 
 #' Store the status of account creation back to Synapse
@@ -256,25 +350,38 @@ main <- function() {
     } else {
       participant_identifier <- NULL
     }
-    status <- create_participant_account(
+    tryCatch({
+      # TODO replace with search participant
+      participant <- bridgeclient::get_participant(
+          phone=phone,
+          email=email,
+          external_id = participant_identifier)
+      status <- update_participant_account(
+          participant = participant,
+          study = study,
+          participant_identifier = participant_identifier,
+          support_email = args[["supportEmail"]],
+          data_groups = data_groups)
+    }, error = function(e) { # create new account
+      status <- create_participant_account(
+          study = args[["study"]],
+          participant_identifier = participant_identifier,
+          phone = phone,
+          email = email,
+          support_email = args[["supportEmail"]],
+          data_groups = data_groups,
+          region_code = args[["regionCode"]])
+      store_result(
         output_table = args[["outputTable"]],
-        study = args[["study"]],
+        participant_identifier_field = args[["participantIdentifier"]],
         participant_identifier = participant_identifier,
-        phone = phone,
-        email = email,
-        support_email = args[["supportEmail"]],
-        data_groups = data_groups,
-        region_code = args[["regionCode"]])
-    store_result(
-      output_table = args[["outputTable"]],
-      participant_identifier_field = args[["participantIdentifier"]],
-      participant_identifier = participant_identifier,
-      status_field = args[["statusField"]],
-      status_message = status[["content"]],
-      log_field = args[["logField"]],
-      log_message = status[["log"]])
+        status_field = args[["statusField"]],
+        status_message = status[["content"]],
+        log_field = args[["logField"]],
+        log_message = status[["log"]])
+    })
   })
 }
 
-main()
+#main()
 
