@@ -337,7 +337,7 @@ main <- function() {
     output_table = args[["outputTable"]],
     participant_identifier = args[["participantIdentifier"]])
   if (nrow(new_participants)) {
-    bridge_login(args$app, args$bridgeEmail, args$bridgePassword)
+    bridgeclient::bridge_login(args$app, args$bridgeEmail, args$bridgePassword)
   }
   purrr::pmap(new_participants, function(...) {
     record <- list(...)
@@ -373,7 +373,7 @@ main <- function() {
         user_id = participant_search$items[[1]]$id)
       status <- update_participant_account(
           participant = participant,
-          study = study,
+          study = args[["study"]],
           participant_identifier = participant_identifier,
           support_email = args[["supportEmail"]],
           data_groups = data_groups)
