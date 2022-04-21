@@ -381,7 +381,7 @@ main <- function() {
       status <- list(
           success = FALSE,
           content = glue("Account update failed. Please contact ",
-                         "{support_email}"),
+                         "{args[['supportEmail']]}"),
           log = glue("There is more than one account which matches ",
                      "that phone or email."))
     }
