@@ -4,8 +4,9 @@ import synapseclient as sc
 import numpy as np
 
 
-def replace_file_handles(syn, df, source_table_id, source_table_cols=None,
-                         content_type = "application/json"):
+def replace_file_handles(
+    syn, df, source_table_id, source_table_cols=None, content_type="application/json"
+):
     """Replace the file handles in columns of type 'FILEHANDLEID'
 
     Parameters
@@ -27,13 +28,13 @@ def replace_file_handles(syn, df, source_table_id, source_table_cols=None,
     for c in source_table_cols:
         if c["columnType"] == "FILEHANDLEID":
             fhid_map = synapsebridgehelpers.copyFileIdsInBatch(
-                    syn,
-                    table_id = source_table_id,
-                    fileIds = df[c["name"]],
-                    content_type = content_type)
+                syn,
+                table_id=source_table_id,
+                fileIds=df[c["name"]],
+                content_type=content_type,
+            )
             fhid_map = {str(k): str(v) for k, v in fhid_map.items()}
-            df[c["name"]] = df[c["name"]].apply(
-                    parse_number_to_string).map(fhid_map)
+            df[c["name"]] = df[c["name"]].apply(parse_number_to_string).map(fhid_map)
     return df
 
 
@@ -71,15 +72,18 @@ def _sanitize_dataframe(syn, records, target=None, cols=None):
     if cols is None:
         cols = syn.getTableColumns(target)
     for c in cols:
-        if (c["columnType"] in ["INTEGER", "DATE", "FILEHANDLEID", "USER"] and
-            len(records[c["name"]]) and
-            isinstance(records[c["name"]].iloc[0], np.number)):
+        if (
+            c["columnType"] in ["INTEGER", "DATE", "FILEHANDLEID", "USER"]
+            and len(records[c["name"]])
+            and isinstance(records[c["name"]].iloc[0], np.number)
+        ):
             records[c["name"]] = list(map(parse_number_to_string, records[c["name"]]))
     return records
 
 
-def _store_dataframe_to_table(syn, df, df_cols, table_id=None, parent_id=None,
-                              table_name=None, **kwargs):
+def _store_dataframe_to_table(
+    syn, df, df_cols, table_id=None, parent_id=None, table_name=None, **kwargs
+):
     """Store a pandas DataFrame to Synapse in a safe way by formatting the
     the values so that the store operation is not rejected by Synapse.
 
@@ -103,23 +107,20 @@ def _store_dataframe_to_table(syn, df, df_cols, table_id=None, parent_id=None,
         Keyword arguments to provide to syn.store (useful for provenance)
     """
     if table_id is None and parent_id is None and table_name is None:
-        raise TypeError("Either the table Synapse ID must be set or "
-                        "the parent ID and table name must be set.")
-    sanitized_dataframe = _sanitize_dataframe(
-            syn,
-            records = df,
-            cols = df_cols)
+        raise TypeError(
+            "Either the table Synapse ID must be set or "
+            "the parent ID and table name must be set."
+        )
+    sanitized_dataframe = _sanitize_dataframe(syn, records=df, cols=df_cols)
     if table_id is None:
         target_table_schema = sc.Schema(
-                name = table_name,
-                parent = parent_id,
-                columns = df_cols)
+            name=table_name, parent=parent_id, columns=df_cols
+        )
         target_table = sc.Table(
-                schema = target_table_schema,
-                values = sanitized_dataframe,
-                headers = df_cols)
+            schema=target_table_schema, values=sanitized_dataframe, columns=df_cols
+        )
     else:
-        target_table = sc.Table(table_id, sanitized_dataframe, headers=df_cols)
+        target_table = sc.Table(table_id, sanitized_dataframe, columns=df_cols)
     target_table = syn.store(target_table, **kwargs)
     return target_table
 
@@ -143,21 +144,26 @@ def dump_on_error(df, e, syn, source_table, target_table):
     dump_name = "target_table_dump.csv"
     df.to_csv(dump_name)
     this_user = syn.getUserProfile()
-    syn.sendMessage(userIds=[this_user["ownerId"]],
-                    messageSubject="Failed Table Export",
-                    messageBody="There was a failed attempt to export table {0} "
-                                "to table {1} after an attempted schema change "
-                                "to {1}. The contents of {1} have been written "
-                                "to {2}.".format(source_table, target_table,
-                                    os.path.join(os.getcwd(), dump_name)))
+    syn.sendMessage(
+        userIds=[this_user["ownerId"]],
+        messageSubject="Failed Table Export",
+        messageBody="There was a failed attempt to export table {0} "
+        "to table {1} after an attempted schema change "
+        "to {1}. The contents of {1} have been written "
+        "to {2}.".format(
+            source_table, target_table, os.path.join(os.getcwd(), dump_name)
+        ),
+    )
     raise Exception(
-            "There was a problem synchronizing the source and target schemas. "
-            "The target table has been saved to {} in the current directory "
-            "as a precautionary measure".format(
-                "target_table_dump.csv")) from e
+        "There was a problem synchronizing the source and target schemas. "
+        "The target table has been saved to {} in the current directory "
+        "as a precautionary measure".format("target_table_dump.csv")
+    ) from e
 
-def compare_schemas(source_cols, target_cols, source_table=None,
-                    target_table=None, rename_threshold=0.9):
+
+def compare_schemas(
+    source_cols, target_cols, source_table=None, target_table=None, rename_threshold=0.9
+):
     """Compare two Table schemas to find the differences between them.
     A difference is either classified as "added" (when the source schema contains
     a column that the target schema lacks), "removed" (when the target schema
@@ -205,19 +211,29 @@ def compare_schemas(source_cols, target_cols, source_table=None,
         added_cols.discard(c)
         removed_cols.discard(c)
     renamed_cols = {}
-    if (source_table is not None and target_table is not None and
-        len(added_cols) and len(removed_cols)):
+    if (
+        source_table is not None
+        and target_table is not None
+        and len(added_cols)
+        and len(removed_cols)
+    ):
         for source_col in added_cols:
             for target_col in removed_cols:
-                if (source_cols_dic[source_col]["columnType"] ==
-                    target_cols_dic[target_col]["columnType"]):
+                if (
+                    source_cols_dic[source_col]["columnType"]
+                    == target_cols_dic[target_col]["columnType"]
+                ):
                     if source_cols_dic[source_col]["columnType"] == "FILEHANDLEID":
                         raise sc.exceptions.SynapseMalformedEntityError(
-                                "A column containing file handles "
-                                "was potentially renamed.")
-                    overlap = [i == j for i, j in
-                               zip(source_table[source_col],
-                                   target_table[target_col])]
+                            "A column containing file handles "
+                            "was potentially renamed."
+                        )
+                    overlap = [
+                        i == j
+                        for i, j in zip(
+                            source_table[source_col], target_table[target_col]
+                        )
+                    ]
                     if sum(overlap) / len(overlap) >= rename_threshold:
                         renamed_cols[target_col] = source_col
         for target_col, source_col in renamed_cols.items():
@@ -230,8 +246,9 @@ def compare_schemas(source_cols, target_cols, source_table=None,
     return comparison
 
 
-def synchronize_schemas(syn, schema_comparison, source, target,
-                        source_cols=None, target_cols=None):
+def synchronize_schemas(
+    syn, schema_comparison, source, target, source_cols=None, target_cols=None
+):
     """Update (on Synapse) a target Schema to match a source Schema.
 
     Parameters
@@ -270,36 +287,46 @@ def synchronize_schemas(syn, schema_comparison, source, target,
         target_cols = syn.getTableColumns(target)
     for action, cols in schema_comparison.items():
         if action == "added":
-            added_columns = list(filter(lambda c : c["name"] in cols,
-                                      source_cols))
+            added_columns = list(filter(lambda c: c["name"] in cols, source_cols))
             target_schema.addColumns(added_columns)
         if action == "removed":
-            removed_columns = filter(lambda c : c["name"] in cols, target_cols)
+            removed_columns = filter(lambda c: c["name"] in cols, target_cols)
             for c in removed_columns:
                 target_schema.removeColumn(c)
         if action == "modified":
-            modified_source_columns = list(filter(lambda c : c["name"] in cols,
-                                                  source_cols))
-            modified_target_columns = list(filter(lambda c : c["name"] in cols,
-                                                  target_cols))
+            modified_source_columns = list(
+                filter(lambda c: c["name"] in cols, source_cols)
+            )
+            modified_target_columns = list(
+                filter(lambda c: c["name"] in cols, target_cols)
+            )
             for c in modified_target_columns:
                 target_schema.removeColumn(c)
             target_schema.addColumns(modified_source_columns)
         if action == "renamed":
             for target_name, source_name in cols.items():
                 renamed_source_column = next(
-                        filter(lambda c : c["name"] == source_name, source_cols))
+                    filter(lambda c: c["name"] == source_name, source_cols)
+                )
                 renamed_target_column = next(
-                        filter(lambda c : c["name"] == target_name, target_cols))
+                    filter(lambda c: c["name"] == target_name, target_cols)
+                )
                 target_schema.removeColumn(renamed_target_column)
                 target_schema.addColumn(renamed_source_column)
     target_schema = syn.store(target_schema)
     return target_schema
 
 
-def export_tables(syn, table_mapping, source_tables=None, target_project=None,
-                  update=True, reference_col="recordId",
-                  copy_file_handles=None, **kwargs):
+def export_tables(
+    syn,
+    table_mapping,
+    source_tables=None,
+    target_project=None,
+    update=True,
+    reference_col="recordId",
+    copy_file_handles=None,
+    **kwargs
+):
     """Copy rows from one Synapse table to another. Or copy tables
     to a new table in a separate project.
 
@@ -348,61 +375,70 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
     -------
     """
     results = {}
-    if isinstance(table_mapping, (list, str)): # export to brand new tables
+    if isinstance(table_mapping, (list, str)):  # export to brand new tables
         if target_project is None:
-            raise TypeError("If passing a list to table_mapping, "
-                            "target_project must be set.")
+            raise TypeError(
+                "If passing a list to table_mapping, " "target_project must be set."
+            )
         if source_tables is None:
             new_records = synapsebridgehelpers.query_across_tables(
-                    syn, tables=table_mapping, as_data_frame=True, **kwargs)
+                syn, tables=table_mapping, as_data_frame=True, **kwargs
+            )
             if isinstance(table_mapping, str):
                 source_tables = {table_mapping: new_records[0]}
             else:
-                source_tables = {
-                        t: df for t, df in zip(table_mapping, new_records)}
+                source_tables = {t: df for t, df in zip(table_mapping, new_records)}
         for source_id, source_table in source_tables.items():
             source_table_info = syn.get(source_id)
             source_table_cols = list(syn.getTableColumns(source_id))
             if copy_file_handles:
                 source_table = replace_file_handles(
-                        syn,
-                        df = source_table,
-                        source_table_id = source_id,
-                        source_table_cols = source_table_cols)
+                    syn,
+                    df=source_table,
+                    source_table_id=source_id,
+                    source_table_cols=source_table_cols,
+                )
             try:
                 target_table = _store_dataframe_to_table(
-                        syn,
-                        df = source_table,
-                        df_cols = source_table_cols,
-                        parent_id = target_project,
-                        table_name = source_table_info["name"],
-                        used = source_id)
-            except sc.core.exceptions.SynapseHTTPError as e: # we don't own the file handles
-                if copy_file_handles: # actually we do, something else is wrong
+                    syn,
+                    df=source_table,
+                    df_cols=source_table_cols,
+                    parent_id=target_project,
+                    table_name=source_table_info["name"],
+                    used=source_id,
+                )
+            except (
+                sc.core.exceptions.SynapseHTTPError
+            ) as e:  # we don't own the file handles
+                if copy_file_handles:  # actually we do, something else is wrong
                     raise sc.core.exceptions.SynapseHTTPError(
                         "There was an issue storing records from {} "
-                        "to {}.".format(source_id, target_project)) from e
-                elif copy_file_handles is False: # user explicitly specified no copies
+                        "to {}.".format(source_id, target_project)
+                    ) from e
+                elif copy_file_handles is False:  # user explicitly specified no copies
                     raise e
                 else:
                     source_table = replace_file_handles(
-                            syn,
-                            df = source_table,
-                            source_table_id = source_id,
-                            source_table_cols = source_table_cols)
+                        syn,
+                        df=source_table,
+                        source_table_id=source_id,
+                        source_table_cols=source_table_cols,
+                    )
                     target_table = _store_dataframe_to_table(
-                            syn,
-                            df = source_table,
-                            df_cols = source_table_cols,
-                            parent_id = target_project,
-                            table_name = source_table_info["name"],
-                            used = source_id)
+                        syn,
+                        df=source_table,
+                        df_cols=source_table_cols,
+                        parent_id=target_project,
+                        table_name=source_table_info["name"],
+                        used=source_id,
+                    )
             results[source_id] = (target_table.tableId, source_table)
-    elif isinstance(table_mapping, dict): # export to preexisting tables
+    elif isinstance(table_mapping, dict):  # export to preexisting tables
         tables = list(table_mapping)
         if source_tables is None:
             new_records = synapsebridgehelpers.query_across_tables(
-                    syn, tables, **kwargs)
+                syn, tables, **kwargs
+            )
             source_tables = {t: df for t, df in zip(tables, new_records)}
         for source, target in table_mapping.items():
             source_table = source_tables[source]
@@ -414,27 +450,30 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
             source_cols = list(syn.getTableColumns(source))
             target_cols = list(syn.getTableColumns(target))
             schema_comparison = compare_schemas(
-                    source_cols = source_cols,
-                    target_cols = target_cols,
-                    source_table = source_table,
-                    target_table = target_table)
-            try: # error after updating schema -> data may be lost from target table
+                source_cols=source_cols,
+                target_cols=target_cols,
+                source_table=source_table,
+                target_table=target_table,
+            )
+            try:  # error after updating schema -> data may be lost from target table
                 if sum(list(map(len, schema_comparison.values()))) > 0:
                     synchronize_schemas(
-                            syn,
-                            schema_comparison = schema_comparison,
-                            source = source,
-                            target = target,
-                            source_cols = source_cols,
-                            target_cols = target_cols)
+                        syn,
+                        schema_comparison=schema_comparison,
+                        source=source,
+                        target=target,
+                        source_cols=source_cols,
+                        target_cols=target_cols,
+                    )
                     # synchronize schema of pandas DataFrame with Synapse
                     for col in schema_comparison["removed"]:
-                        target_table = target_table.drop(col, axis = 1)
+                        target_table = target_table.drop(col, axis=1)
                     target_table = target_table.rename(
-                            schema_comparison["renamed"], axis = 1)
+                        schema_comparison["renamed"], axis=1
+                    )
                     target_table = _sanitize_dataframe(syn, target_table, target)
                     target_table = target_table.reset_index(drop=True)
-                    syn.store(sc.Table(target, target_table, headers = source_cols))
+                    syn.store(sc.Table(target, target_table, columns=source_cols))
             except Exception as e:
                 dump_on_error(target_table, e, syn, source, target)
             if update:
@@ -442,89 +481,107 @@ def export_tables(syn, table_mapping, source_tables=None, target_project=None,
                     source_table = source_table.set_index(reference_col, drop=False)
                     target_table = target_table.set_index(reference_col, drop=False)
                 else:
-                    raise TypeError("If updating target tables with new records "
-                                    "from a source table, you must specify a "
-                                    "reference column as a basis for comparison.")
+                    raise TypeError(
+                        "If updating target tables with new records "
+                        "from a source table, you must specify a "
+                        "reference column as a basis for comparison."
+                    )
                 new_records = source_table.loc[
-                        source_table.index.difference(target_table.index)]
+                    source_table.index.difference(target_table.index)
+                ]
                 if len(new_records):
                     source_table_info = syn.get(source)
                     source_table_cols = list(syn.getTableColumns(source))
-                    if (copy_file_handles):
+                    if copy_file_handles:
                         new_records = replace_file_handles(
-                                syn,
-                                df = new_records,
-                                source_table_id = source,
-                                source_table_cols = source_table_cols)
+                            syn,
+                            df=new_records,
+                            source_table_id=source,
+                            source_table_cols=source_table_cols,
+                        )
                     try:
                         target_table = _store_dataframe_to_table(
-                                syn,
-                                df = new_records,
-                                df_cols = source_table_cols,
-                                table_id = target,
-                                used = source)
-                    except sc.core.exceptions.SynapseHTTPError as e: # we don't own the file handles
-                        if copy_file_handles: # actually we do, something else is wrong
+                            syn,
+                            df=new_records,
+                            df_cols=source_table_cols,
+                            table_id=target,
+                            used=source,
+                        )
+                    except (
+                        sc.core.exceptions.SynapseHTTPError
+                    ) as e:  # we don't own the file handles
+                        if copy_file_handles:  # actually we do, something else is wrong
                             raise sc.core.exceptions.SynapseHTTPError(
                                 "There was an issue storing records from {} "
-                                "to {}.".format(source, target)) from e
-                        elif copy_file_handles is False: # user specified no copies
+                                "to {}.".format(source, target)
+                            ) from e
+                        elif copy_file_handles is False:  # user specified no copies
                             raise e
                         else:
                             source_table = replace_file_handles(
-                                    syn,
-                                    df = new_records,
-                                    source_table_id = source,
-                                    source_table_cols = source_table_cols)
+                                syn,
+                                df=new_records,
+                                source_table_id=source,
+                                source_table_cols=source_table_cols,
+                            )
                             target_table = _store_dataframe_to_table(
-                                    syn,
-                                    df = new_records,
-                                    df_cols = source_table_cols,
-                                    table_id = target,
-                                    used = source)
+                                syn,
+                                df=new_records,
+                                df_cols=source_table_cols,
+                                table_id=target,
+                                used=source,
+                            )
                     results[source] = (target, new_records)
-            else: # delete existing rows, store upstream rows
+            else:  # delete existing rows, store upstream rows
                 target_table = syn.tableQuery("select * from {}".format(target))
                 syn.delete(target_table.asRowSet())
                 source_cols = list(syn.getTableColumns(source))
                 table_to_store = source_table
                 if copy_file_handles:
                     table_to_store = replace_file_handles(
-                            syn,
-                            df = source_table,
-                            source_table_id = source,
-                            source_table_cols = source_cols)
+                        syn,
+                        df=source_table,
+                        source_table_id=source,
+                        source_table_cols=source_cols,
+                    )
                 try:
                     target_table = _store_dataframe_to_table(
-                            syn,
-                            df = table_to_store,
-                            df_cols = source_cols,
-                            table_id = target,
-                            used = source)
-                except sc.core.exceptions.SynapseHTTPError as e: # we don't own the file handles
-                    if copy_file_handles: # actually we do, something else is wrong
+                        syn,
+                        df=table_to_store,
+                        df_cols=source_cols,
+                        table_id=target,
+                        used=source,
+                    )
+                except (
+                    sc.core.exceptions.SynapseHTTPError
+                ) as e:  # we don't own the file handles
+                    if copy_file_handles:  # actually we do, something else is wrong
                         raise sc.core.exceptions.SynapseHTTPError(
                             "There was an issue storing records from {} "
-                            "to {}.".format(source, target)) from e
-                    elif copy_file_handles is False: # user specified no copies
+                            "to {}.".format(source, target)
+                        ) from e
+                    elif copy_file_handles is False:  # user specified no copies
                         raise e
                     else:
                         table_to_store = replace_file_handles(
-                                syn,
-                                df = table_to_store,
-                                source_table_id = source,
-                                source_table_cols = source_cols)
+                            syn,
+                            df=table_to_store,
+                            source_table_id=source,
+                            source_table_cols=source_cols,
+                        )
                         target_table = _store_dataframe_to_table(
-                                syn,
-                                df = table_to_store,
-                                df_cols = source_cols,
-                                table_id = target,
-                                used = source)
+                            syn,
+                            df=table_to_store,
+                            df_cols=source_cols,
+                            table_id=target,
+                            used=source,
+                        )
                 results[source] = (target, table_to_store)
     else:
-        raise TypeError("table_mapping must be either a list (if exporting "
-                        "tables to a target_project), str (if exporting a single "
-                        "table to a project), or a dict (if exporting "
-                        "tables to preexisting tables).")
+        raise TypeError(
+            "table_mapping must be either a list (if exporting "
+            "tables to a target_project), str (if exporting a single "
+            "table to a project), or a dict (if exporting "
+            "tables to preexisting tables)."
+        )
     return results
-
