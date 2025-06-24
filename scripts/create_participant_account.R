@@ -17,9 +17,8 @@ read_args <- function() {
       make_option("--bridgeEmail",
           help="Required. The email address associated with your Bridge account."),
       make_option("--bridgePassword", help="Required. Your Bridge password."),
-      make_option("--synapseEmail",
-          help="Required. The email address associated with your Synapse account."),
-      make_option("--synapsePassword", help="Required. Your Synapse password."),
+      make_option("--synapseAccessToken",
+          help="Required. A Synapse Access Token. Used for authentication."),
       make_option("--study",
           help="The identifier of the study to enroll users in."),
       make_option("--participantIdentifier",
@@ -79,7 +78,7 @@ read_args <- function() {
 
 validate_args <- function(args) {
   required_arguments <- c("inputTable", "outputTable", "app", "bridgeEmail",
-                          "bridgePassword", "synapseEmail", "synapsePassword",
+                          "bridgePassword", "synapseAccessToken",
                           "participantIdentifier", "statusField", "logField")
   lapply(required_arguments, function(arg) {
     if (!hasName(args, arg)) {
@@ -331,7 +330,7 @@ main <- function() {
   } else {
     data_groups <- NULL
   }
-  synLogin(email = args$synapseEmail, password = args$synapsePassword)
+  synLogin(authToken = args$synapseAccessToken)
   new_participants <- get_new_participants(
     input_table = args[["inputTable"]],
     output_table = args[["outputTable"]],
