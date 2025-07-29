@@ -12,8 +12,7 @@ import synapsebridgehelpers
 
 def read_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--synapse-username")
-    parser.add_argument("--synapse-password")
+    parser.add_argument("--synapse-access-token")
     parser.add_argument("--study", help="The Bridge study name to filter upon.")
     parser.add_argument("--reference-table",
             help=("The table to reference for users who belong to this study. "
@@ -58,7 +57,7 @@ def verify_no_new_table_versions(syn):
 
 def main():
     args = read_args()
-    syn = sc.login(args.synapse_username, args.synapse_password)
+    syn = sc.login(authToken=args.synapse_access_token)
     if args.study == "Cirrhosis_pilot":
         verify_no_new_table_versions(syn)
     relevant_healthcodes = get_relevant_healthcodes(
