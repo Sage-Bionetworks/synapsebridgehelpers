@@ -1,7 +1,10 @@
 import os
+import logging
 import synapsebridgehelpers
 import synapseclient as sc
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def replace_file_handles(
@@ -23,10 +26,17 @@ def replace_file_handles(
     The pandas.DataFrame `df` but with new file handle values in columns
     of type 'FILEHANDLEID' within the source table.
     """
+    logger.info("Replacing file handles for source table %s", source_table_id)
     if source_table_cols is None:
         source_table_cols = syn.getTableColumns(source_table_id)
     for c in source_table_cols:
         if c["columnType"] == "FILEHANDLEID":
+            file_handle_count = int(df[c["name"]].notna().sum())
+            logger.debug(
+                "Copying %d file handles for column %s",
+                file_handle_count,
+                c["name"],
+            )
             fhid_map = synapsebridgehelpers.copyFileIdsInBatch(
                 syn,
                 table_id=source_table_id,
@@ -39,6 +49,7 @@ def replace_file_handles(
 
 
 def parse_number_to_string(i):
+    logger.debug("Parsing value to string-safe Synapse format")
     str_i = str(i)
     if str_i == "nan":
         str_i = None
@@ -66,6 +77,7 @@ def _sanitize_dataframe(syn, records, target=None, cols=None):
     A pandas DataFrame with values and their dtypes modified in a way that
     allows them to be stored to Synapse as a Table.
     """
+    logger.debug("Sanitizing dataframe for Synapse table upload")
     records = records.reset_index(drop=True)
     if cols is None and target is None:
         raise TypeError("Either target or cols must be set.")
@@ -77,6 +89,7 @@ def _sanitize_dataframe(syn, records, target=None, cols=None):
             and len(records[c["name"]])
             and isinstance(records[c["name"]].iloc[0], np.number)
         ):
+            logger.debug("Sanitizing column %s of type %s", c["name"], c["columnType"])
             records[c["name"]] = list(map(parse_number_to_string, records[c["name"]]))
     return records
 
@@ -106,6 +119,12 @@ def _store_dataframe_to_table(
     **kwargs :
         Keyword arguments to provide to syn.store (useful for provenance)
     """
+    logger.info(
+        "Storing dataframe to table (table_id=%s, parent_id=%s, table_name=%s)",
+        table_id,
+        parent_id,
+        table_name,
+    )
     if table_id is None and parent_id is None and table_name is None:
         raise TypeError(
             "Either the table Synapse ID must be set or "
@@ -122,6 +141,7 @@ def _store_dataframe_to_table(
     else:
         target_table = sc.Table(table_id, sanitized_dataframe, columns=df_cols)
     target_table = syn.store(target_table, **kwargs)
+    logger.info("Stored dataframe successfully")
     return target_table
 
 
@@ -141,6 +161,11 @@ def dump_on_error(df, e, syn, source_table, target_table):
     -------
     None
     """
+    logger.exception(
+        "Failed during schema synchronization (source=%s, target=%s)",
+        source_table,
+        target_table,
+    )
     dump_name = "target_table_dump.csv"
     df.to_csv(dump_name)
     this_user = syn.getUserProfile()
@@ -201,6 +226,7 @@ def compare_schemas(
     The value of renamed is a key mapping the column name in the target table
     to the new column name in the source table. The rest of the values are sets.
     """
+    logger.debug("Comparing source and target schemas")
     comparison = {}
     source_cols_dic = {c["name"]: c for c in source_cols}
     target_cols_dic = {c["name"]: c for c in target_cols}
@@ -243,6 +269,13 @@ def compare_schemas(
     comparison["modified"] = modified_cols
     comparison["removed"] = removed_cols
     comparison["added"] = added_cols
+    logger.info(
+        "Schema comparison complete (added=%d, removed=%d, modified=%d, renamed=%d)",
+        len(comparison["added"]),
+        len(comparison["removed"]),
+        len(comparison["modified"]),
+        len(comparison["renamed"]),
+    )
     return comparison
 
 
@@ -280,6 +313,7 @@ def synchronize_schemas(
     -------
     The synchronized Schema of the target Table.
     """
+    logger.info("Synchronizing schema from %s to %s", source, target)
     target_schema = syn.get(target)
     if source_cols is None:
         source_cols = syn.getTableColumns(source)
@@ -287,13 +321,16 @@ def synchronize_schemas(
         target_cols = syn.getTableColumns(target)
     for action, cols in schema_comparison.items():
         if action == "added":
+            logger.debug("Adding %d columns", len(cols))
             added_columns = list(filter(lambda c: c["name"] in cols, source_cols))
             target_schema.addColumns(added_columns)
         if action == "removed":
+            logger.debug("Removing %d columns", len(cols))
             removed_columns = filter(lambda c: c["name"] in cols, target_cols)
             for c in removed_columns:
                 target_schema.removeColumn(c)
         if action == "modified":
+            logger.debug("Replacing %d modified columns", len(cols))
             modified_source_columns = list(
                 filter(lambda c: c["name"] in cols, source_cols)
             )
@@ -304,6 +341,7 @@ def synchronize_schemas(
                 target_schema.removeColumn(c)
             target_schema.addColumns(modified_source_columns)
         if action == "renamed":
+            logger.debug("Renaming %d columns", len(cols))
             for target_name, source_name in cols.items():
                 renamed_source_column = next(
                     filter(lambda c: c["name"] == source_name, source_cols)
@@ -314,6 +352,7 @@ def synchronize_schemas(
                 target_schema.removeColumn(renamed_target_column)
                 target_schema.addColumn(renamed_source_column)
     target_schema = syn.store(target_schema)
+    logger.info("Schema synchronization complete")
     return target_schema
 
 
@@ -374,8 +413,10 @@ def export_tables(
     Returns
     -------
     """
+    logger.info("Starting table export")
     results = {}
     if isinstance(table_mapping, (list, str)):  # export to brand new tables
+        logger.info("Export mode: create new table(s)")
         if target_project is None:
             raise TypeError(
                 "If passing a list to table_mapping, " "target_project must be set."
@@ -389,6 +430,9 @@ def export_tables(
             else:
                 source_tables = {t: df for t, df in zip(table_mapping, new_records)}
         for source_id, source_table in source_tables.items():
+            logger.info(
+                "Exporting source table %s into project %s", source_id, target_project
+            )
             source_table_info = syn.get(source_id)
             source_table_cols = list(syn.getTableColumns(source_id))
             if copy_file_handles:
@@ -410,6 +454,11 @@ def export_tables(
             except (
                 sc.core.exceptions.SynapseHTTPError
             ) as e:  # we don't own the file handles
+                logger.warning(
+                    "HTTP error while storing source table %s into %s; handling file handles",
+                    source_id,
+                    target_project,
+                )
                 if copy_file_handles:  # actually we do, something else is wrong
                     raise sc.core.exceptions.SynapseHTTPError(
                         "There was an issue storing records from {} "
@@ -434,6 +483,7 @@ def export_tables(
                     )
             results[source_id] = (target_table.tableId, source_table)
     elif isinstance(table_mapping, dict):  # export to preexisting tables
+        logger.info("Export mode: sync/update preexisting tables")
         tables = list(table_mapping)
         if source_tables is None:
             new_records = synapsebridgehelpers.query_across_tables(
@@ -441,8 +491,10 @@ def export_tables(
             )
             source_tables = {t: df for t, df in zip(tables, new_records)}
         for source, target in table_mapping.items():
+            logger.info("Processing source %s -> target %s", source, target)
             source_table = source_tables[source]
             if source_table.shape[0] == 0:
+                logger.info("Skipping source %s because it has no rows", source)
                 continue
             target_table = syn.tableQuery("select * from {}".format(target))
             target_table = target_table.asDataFrame()
@@ -457,6 +509,7 @@ def export_tables(
             )
             try:  # error after updating schema -> data may be lost from target table
                 if sum(list(map(len, schema_comparison.values()))) > 0:
+                    logger.info("Applying schema changes before data export")
                     synchronize_schemas(
                         syn,
                         schema_comparison=schema_comparison,
@@ -477,6 +530,7 @@ def export_tables(
             except Exception as e:
                 dump_on_error(target_table, e, syn, source, target)
             if update:
+                logger.info("Update mode enabled for target %s", target)
                 if reference_col is not None:
                     source_table = source_table.set_index(reference_col, drop=False)
                     target_table = target_table.set_index(reference_col, drop=False)
@@ -490,6 +544,9 @@ def export_tables(
                     source_table.index.difference(target_table.index)
                 ]
                 if len(new_records):
+                    logger.info(
+                        "Found %d new records to append to %s", len(new_records), target
+                    )
                     source_table_info = syn.get(source)
                     source_table_cols = list(syn.getTableColumns(source))
                     if copy_file_handles:
@@ -510,6 +567,11 @@ def export_tables(
                     except (
                         sc.core.exceptions.SynapseHTTPError
                     ) as e:  # we don't own the file handles
+                        logger.warning(
+                            "HTTP error while appending new records from %s to %s; handling file handles",
+                            source,
+                            target,
+                        )
                         if copy_file_handles:  # actually we do, something else is wrong
                             raise sc.core.exceptions.SynapseHTTPError(
                                 "There was an issue storing records from {} "
@@ -532,7 +594,10 @@ def export_tables(
                                 used=source,
                             )
                     results[source] = (target, new_records)
+                else:
+                    logger.info("No new records to append for source %s", source)
             else:  # delete existing rows, store upstream rows
+                logger.info("Replace mode enabled for target %s", target)
                 target_table = syn.tableQuery("select * from {}".format(target))
                 syn.delete(target_table.asRowSet())
                 source_cols = list(syn.getTableColumns(source))
@@ -555,6 +620,11 @@ def export_tables(
                 except (
                     sc.core.exceptions.SynapseHTTPError
                 ) as e:  # we don't own the file handles
+                    logger.warning(
+                        "HTTP error while replacing records from %s to %s; handling file handles",
+                        source,
+                        target,
+                    )
                     if copy_file_handles:  # actually we do, something else is wrong
                         raise sc.core.exceptions.SynapseHTTPError(
                             "There was an issue storing records from {} "
@@ -584,4 +654,5 @@ def export_tables(
             "table to a project), or a dict (if exporting "
             "tables to preexisting tables)."
         )
+    logger.info("Completed table export for %d source table(s)", len(results))
     return results
