@@ -183,13 +183,28 @@ def main():
     relevant_healthcodes = get_relevant_healthcodes(
         syn=syn, reference_table=args.reference_table, study=args.study
     )
-    synapsebridgehelpers.export_tables(
-        syn=syn,
-        table_mapping=table_mapping,
-        target_project=args.target_project,
-        identifier_col="healthCode",
-        identifier=relevant_healthcodes,
-    )
+    try:
+        synapsebridgehelpers.export_tables(
+            syn=syn,
+            table_mapping=table_mapping,
+            target_project=args.target_project,
+            identifier_col="healthCode",
+            identifier=relevant_healthcodes,
+        )
+    except Exception as e:
+        if args.scheduled_job != "enabled":
+            raise
+        error_message = (
+            f"An error occurred during table export: {str(e)}\n\n"
+            "Please inspect the scheduled job logs in the service catalog."
+        )
+        logging.error(error_message)
+        syn.sendMessage(
+            [syn.getUserProfile()["ownerId"]],
+            "mPower table export failure",
+            error_message,
+        )
+        raise
 
 
 if __name__ == "__main__":
